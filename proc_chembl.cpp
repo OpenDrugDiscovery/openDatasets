@@ -95,6 +95,7 @@ void process_chembl(std::string in_fname, std::string out_fname, const float max
         for (auto &frag : frags) {
             outfile << id << "\t" << RDKit::MolToSmiles(*frag) << "\t" << std_inchi << "\t" << std_inchi_key << "\n";
         }
+        frags.clear(); // reset the fragment vector
     }
     // cleanup
     infile.close();
