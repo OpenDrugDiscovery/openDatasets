@@ -2,6 +2,7 @@
 #include <vector>
 #include <fstream>
 #include <iostream>
+#include <chrono>
 
 #include <boost/algorithm/string.hpp>
 
@@ -67,6 +68,7 @@ void process_chembl(std::string in_fname, std::string out_fname, const float max
 
     int update_every = 0.01 * numLines;
     
+    auto start = std::chrono::high_resolution_clock::now();
     while (std::getline(infile, line)) {
         i++;
         if (i == 1) {
@@ -100,7 +102,10 @@ void process_chembl(std::string in_fname, std::string out_fname, const float max
     // cleanup
     infile.close();
     outfile.close();
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
     std::cout << std::endl;
+    std::cout << "Processed " << i << " lines in " << duration.count() / 1000.0 << " seconds" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
