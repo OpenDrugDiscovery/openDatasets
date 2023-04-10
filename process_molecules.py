@@ -9,7 +9,11 @@ from rdkit.Chem.EnumerateStereoisomers import (
     StereoEnumerationOptions
 )
 from rdkit.Chem.rdchem import Mol
+from rdkit.Chem.Descriptors import MolWt
 from rdkit.Chem.MolStandardize import rdMolStandardize
+from rdkit import RDLogger
+
+RDLogger.DisableLog('rdApp.*')
 
 def get_mol_frags(mol: Mol, discard_gt_eq: int=300) -> List[Mol]:
     """
@@ -20,7 +24,7 @@ def get_mol_frags(mol: Mol, discard_gt_eq: int=300) -> List[Mol]:
         discard_gt_eq (int): Discard fragments with a weight greater than or equal to this value.
     """
     frags = Chem.GetMolFrags(mol, asMols=True)
-    return [x for x in frags if Chem.MolWt(x) < discard_gt_eq]
+    return [x for x in frags if MolWt(x) < discard_gt_eq]
 
 def generate_tautomers(mol: Mol, max_tautomers: int=5) -> List[Mol]:
     """
@@ -75,7 +79,7 @@ def process_molecules(
     with open(in_fname, "r") as infile, open(out_fname, "w") as outfile:
         reader = csv.reader(infile, delimiter="\t")
         writer = csv.writer(outfile, delimiter="\t")
-        for i, line in enumerate(reader):
+        for i, line in enumerate(tqdm(reader)):
             if i == 0:
                 # just write the header here
                 joined = "\t".join(line)
@@ -86,7 +90,7 @@ def process_molecules(
             mol_id, smiles, std_inchi, std_inchi_key = line
             mol = Chem.MolFromSmiles(smiles)
 
-            if Chem.MolWt(mol) > max_mol_weight:
+            if MolWt(mol) > max_mol_weight:
                 continue
 
             isomers = EnumerateStereoisomers(mol, options=opts)
@@ -118,10 +122,10 @@ if __name__ == "__main__":
 """)
     parser.add_argument("-i", "--in-fname", type=str, help="Path to input file.")
     parser.add_argument("-o", "--out-fname", type=str, help="Path to output file.")
-    parser.add_argument("-mw", "--max-mol-weight", type=float, help="Maximum molecular weight (default: 1000.0 dA).")
-    parser.add_argument("-fw", "--max-frag-weight", type=float, help="Maximum fragment weight (default: 300.0 dA).")
+    parser.add_argument("-mw", "--max-mol-weight", type=float, default=1000.0, help="Maximum molecular weight (default: 1000.0 dA).")
+    parser.add_argument("-fw", "--max-frag-weight", type=float, default=300.0, help="Maximum fragment weight (default: 300.0 dA).")
     parser.add_argument("-mi", "--max-isomers", type=int, default=10, help="Maximum number of isomers to enumerate (default: 10).")
     parser.add_argument("-mt", "--max-tautomers", type=int, default=5, help="Maximum number of tautomers to enumerate (default: 5).")
     
-    args = parser.parse_args()
-    process_molecules(*args)
+    args = vars(parser.parse_args())
+    process_molecules(**args)
