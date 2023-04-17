@@ -13,7 +13,7 @@ dependencies:
   - libstdcxx-ng=11.2.0
   - libuuid=1.41.5
   - ncurses=6.4
-  - openssl=1.1.1t
+  - openssl=1.1.1
   - pip=23.0.1
   - python=3.10.10
   - readline=8.2
