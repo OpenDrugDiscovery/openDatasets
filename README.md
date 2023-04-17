@@ -9,13 +9,17 @@
 | ChEMBL                  | https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/chembl_32_chemreps.txt.gz |
 | Zinc (Clean, Drug-like) | http://zinc12.docking.org/db/bysubset/13/usual.sdf.csh                               |
 
-## Required Dependencies
+## Required Major Dependencies
 1. gcc and g++
 2. cmake
 3. boost
 4. RDKit
+5. Datamol
 
-## Running the Code
+## Running The Code (Python)
+Run `python process_molecules --in-fname path_to_input_file.txt --out-fname path_to_output_file.txt`.
+
+## Running the Code (C++)
 To build and run the `proc_chembl.cpp` program, do the following:
 
 ```
