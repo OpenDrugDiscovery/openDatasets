@@ -1,6 +1,9 @@
 import csv
 
+import datamol as dm
+
 from typing import List
+from collections import defaultdict
 from tqdm import tqdm
 from rdkit import Chem
 from argparse import ArgumentParser
@@ -55,13 +58,44 @@ def count_lines(fpath: str) -> int:
     """
     return sum(1 for i in open(fpath, 'rb'))
 
+def process_single_molecule(line: str,
+                            max_mol_weight: float=1000.0,
+                            max_frag_weight: float=300.0,
+                            max_tautomers: int=5,
+                            max_isomers: int=10,
+                            opts=StereoEnumerationOptions(tryEmbedding=True, unique=True, maxIsomers=10)) -> List[Mol]:
+                            
+    mol_id, smiles, std_inchi, std_inchi_key = line
+    mol = Chem.MolFromSmiles(smiles)
+    all_variants = []
+
+    if MolWt(mol) > max_mol_weight:
+        return
+    
+    isomers = EnumerateStereoisomers(mol, options=opts)
+
+    sorted_tautomers = generate_tautomers(mol, max_tautomers=max_tautomers)
+
+    all_variants += get_mol_frags(mol, discard_gt_eq=max_frag_weight)
+
+    for isomer in isomers:
+        frags = get_mol_frags(isomer, discard_gt_eq=max_frag_weight)
+        all_variants += frags
+
+    for taut in sorted_tautomers:
+        frags = get_mol_frags(taut, discard_gt_eq=max_frag_weight)
+        all_variants += frags
+
+    return all_variants
+
 def process_molecules(
         in_fname: str, 
         out_fname: str, 
         max_mol_weight: float=1000.0, 
         max_frag_weight: float=300.0,
         max_isomers: int=10,
-        max_tautomers: int=5) -> None:
+        max_tautomers: int=5,
+        opts=StereoEnumerationOptions(tryEmbedding=True, unique=True, maxIsomers=10)) -> None:
     """
     Process a .tsv file of molecules and write out a new one with 
     fragments generated from selected stereoisomers and tautomers of
@@ -75,43 +109,25 @@ def process_molecules(
         max_isomers (int): Maximum number of isomers to enumerate.
         max_tautomers (int): Maximum number of tautomers to enumerate.
     """
-    opts = StereoEnumerationOptions(tryEmbedding=True, unique=True, maxIsomers=max_isomers)
     with open(in_fname, "r") as infile, open(out_fname, "w") as outfile:
+        header = infile.readline().split("\t")
         reader = csv.reader(infile, delimiter="\t")
         writer = csv.writer(outfile, delimiter="\t")
-        for i, line in enumerate(tqdm(reader)):
-            if i == 0:
-                # just write the header here
-                joined = "\t".join(line)
-                outfile.write(joined + "\n")
-                continue
-            
-            all_variants = []
-            mol_id, smiles, std_inchi, std_inchi_key = line
-            mol = Chem.MolFromSmiles(smiles)
+        writer.writerow(["count", "smiles", "inchi_key"])
+        seen_fragments = defaultdict(int)
+        results = dm.parallelized(process_single_molecule, reader, n_jobs=-1, total=count_lines(in_fname))
 
-            if MolWt(mol) > max_mol_weight:
-                continue
+        def count_frags(list_of_var_list):
+            for var_list in list_of_var_list:
+                for variant in var_list:
+                    var_smiles = Chem.MolToSmiles(variant)
+                    seen_fragments[var_smiles] += 1
 
-            isomers = EnumerateStereoisomers(mol, options=opts)
-
-            sorted_tautomers = generate_tautomers(mol, max_tautomers=max_tautomers)
-
-            all_variants += get_mol_frags(mol, discard_gt_eq=max_frag_weight)
-
-            for isomer in isomers:
-                frags = get_mol_frags(isomer, discard_gt_eq=max_frag_weight)
-                all_variants += frags
-
-            for taut in sorted_tautomers:
-                frags = get_mol_frags(taut, discard_gt_eq=max_frag_weight)
-                all_variants += frags
-
-            for variant in all_variants:
-                var_smiles = Chem.MolToSmiles(variant)
-                var_std_inchi = Chem.MolToInchi(variant)
-                var_std_inchi_key = Chem.InchiToInchiKey(var_std_inchi)
-                writer.writerow([mol_id, var_smiles, var_std_inchi, var_std_inchi_key])
+        count_frags(results)
+        for var_smiles, count in seen_fragments.items():
+            mol = Chem.MolFromSmiles(var_smiles)
+            var_std_inchi_key = Chem.MolToInchiKey(mol)
+            writer.writerow([str(count), var_smiles, var_std_inchi_key])
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="""Process a .tsv file of molecules by: 
