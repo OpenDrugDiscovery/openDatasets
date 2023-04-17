@@ -119,6 +119,8 @@ def process_molecules(
 
         def count_frags(list_of_var_list):
             for var_list in list_of_var_list:
+                if var_list is None:
+                    continue
                 for variant in var_list:
                     var_smiles = Chem.MolToSmiles(variant)
                     seen_fragments[var_smiles] += 1
