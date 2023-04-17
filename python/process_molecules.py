@@ -110,13 +110,15 @@ def process_molecules(
         max_tautomers (int): Maximum number of tautomers to enumerate.
     """
     with open(in_fname, "r") as infile, open(out_fname, "w") as outfile:
+        line_count = len(open(in_fname, "r").readlines()) - 1
         header = infile.readline().split("\t")
         reader = csv.reader(infile, delimiter="\t")
         writer = csv.writer(outfile, delimiter="\t")
         writer.writerow(["count", "smiles", "inchi_key"])
         seen_fragments = defaultdict(int)
-        results = dm.parallelized(process_single_molecule, reader, n_jobs=-1, total=count_lines(in_fname))
+        results = dm.parallelized(process_single_molecule, reader, n_jobs=-1, progress=True, total=line_count)
 
+        print("Counting fragments and writing output...")
         def count_frags(list_of_var_list):
             for var_list in list_of_var_list:
                 if var_list is None:
