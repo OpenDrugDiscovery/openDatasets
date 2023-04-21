@@ -1,11 +1,6 @@
-import os
 import sys
-import time
 import json
-import h5py
-import tqdm
 import typer
-import fsspec
 import logging
 import datetime
 import subprocess
@@ -13,19 +8,11 @@ import numpy as np
 import pandas as pd
 import datamol as dm
 
-from collections import Counter, OrderedDict
 from typing import Optional, Union
 from loguru import logger
 from openff.units import unit
-from openff.toolkit.topology import Molecule
-from openff.qcsubmit.factories import BasicDatasetFactory, OptimizationDatasetFactory
-from openff.toolkit.typing.engines.smirnoff import ForceField
-from openff.qcsubmit.datasets import BasicDataset
-from qcfractal.interface.models import TaskStatusEnum
+from openff.qcsubmit.factories import OptimizationDatasetFactory
 import qcfractal.interface as interface
-from openff.qcsubmit import workflow_components
-
-from odd_datasets.conformers import generate_conformers
 
 # disable openff-toolkit warnings
 logging.getLogger("openff.toolkit").setLevel(logging.ERROR)
@@ -75,7 +62,6 @@ def check_computation_status(server_info_file=None):
     # print(res)
 
 
-
 def geometry_optimization_specification():
     """ Specification for semi-empirical geometry optimization """
     # Create the spec
@@ -99,7 +85,7 @@ def geometry_optimization_specification():
     return qc_specifications
 
 
-class ConformersDataset:
+class QCFractalOptDataset:
     """
     Base class for datasets of molecular conformers opimized at the semi-empirical level"""
 
@@ -158,4 +144,5 @@ class ConformersDataset:
         
         responses = self._dataset.submit(self.computation_server, verbose=True)
         logger.info(f"Submitted {len(responses)} tasks to {self.server_info['address']}")
+        return responses
 
