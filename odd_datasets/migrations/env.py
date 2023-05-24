@@ -1,3 +1,4 @@
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -5,6 +6,24 @@ from sqlalchemy import pool
 
 from alembic import context
 from qcfractal.storage_sockets.models import Base
+
+def database_uri(config, db_name) -> str:
+
+    uri = "postgresql://"
+    if config.get("user") is not None:
+        uri += f"{config.get('user')}"
+
+        if config.get('passwd') is not None:
+            uri += ':'+config.get('passwd')
+
+        uri += "@"
+
+    if config.get('port') is not None:
+        uri += f"{config.get('host')}:{config.get('port')}/{db_name}"
+    else:
+        uri += f"{config.get('host')}/{db_name}"
+
+    return uri
 
 
 # this is the Alembic Config object, which provides
@@ -31,6 +50,20 @@ compare_type = True
 
 # Overwrite the ini-file sqlalchemy.url path
 uri = context.get_x_argument(as_dictionary=True).get("uri")
+print(uri)
+os.environ["ODD_POSTGRES_DB_USER"] = "prudencio"
+# os.environ["ODD_POSTGRES_DB_PASSWORD"] = "odd1234"
+os.environ["ODD_POSTGRES_DB_HOST"] = "localhost"
+# os.environ["ODD_POSTGRES_DB_PORT"] = "5432"
+uri_args = dict(
+    user=os.environ.get('ODD_POSTGRES_DB_USER', None),
+    passwd=os.environ.get('ODD_POSTGRES_DB_PASSWORD', None),
+    host=os.environ.get('ODD_POSTGRES_DB_HOST', "localhost"),
+    port=os.environ.get('ODD_POSTGRES_DB_PORT', None),
+)
+uri = database_uri(uri_args, "qcfractal_default")
+print("uri", uri)
+# exit(1)
 config.set_main_option("sqlalchemy.url", uri)
 
 
@@ -84,3 +117,6 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
+
+
+

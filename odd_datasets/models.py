@@ -2,7 +2,6 @@ import uuid
 from sqlalchemy import Column, Integer, String, Float, Boolean, Index, ForeignKey
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from qcfractal.storage_sockets.models import MsgpackExt, Base
-from sqlalchemy.orm import relationship
 
 
 class MolecularSystemORM(Base):
@@ -11,7 +10,7 @@ class MolecularSystemORM(Base):
     """
 
     __tablename__ = "molecular_system"
-    id = Column(UUID(as_uuid=False), primary_key=True, default=uuid.uuid4, unique=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True)
     name = Column(String)
     type= Column(String)
     inchikey = Column(String)
@@ -32,7 +31,7 @@ class ConformerORM(Base):
 
     __tablename__ = "conformer"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=uuid.uuid4, unique=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True)
     system_id = Column(UUID(as_uuid=False), ForeignKey("molecular_system.id", ondelete="cascade"), primary_key=True)
     molecular_formula = Column(String)
 
@@ -77,14 +76,14 @@ class ConformerORM(Base):
     __table_args__ = (Index("ix_molecule_hash", "molecule_hash", unique=False),)
 
 
-class TrajectoryConformerORM(Base):
-    """
-    The trajectory is a collection of conformers that are ordered by optimization steps 
-    """
-    __tablename__ = "trajectory_conformer"
-    trajectory_id = Column(UUID(as_uuid=False), ForeignKey("trajectory.id", ondelete="cascade"), primary_key=True)
-    conformer_id = Column(UUID(as_uuid=False), ForeignKey("conformer.id", ondelete="cascade"), primary_key=True)
-    position = Column(Integer, )
+# class TrajectoryConformerORM(Base):
+#     """
+#     The trajectory is a collection of conformers that are ordered by optimization steps 
+#     """
+#     __tablename__ = "trajectory_conformer"
+#     trajectory_id = Column(UUID(as_uuid=True), ForeignKey("trajectory.id", ondelete="cascade"), primary_key=True)
+#     conformer_id = Column(UUID(as_uuid=True), ForeignKey("conformer.id", ondelete="cascade"), primary_key=True)
+#     position = Column(Integer, )
 
 
 class TrajectoryORM(Base):
@@ -92,5 +91,6 @@ class TrajectoryORM(Base):
     The trajectory is a collection of conformers that are ordered by optimization steps 
     """
     __tablename__ = "trajectory"
-    id = Column(UUID(as_uuid=False), primary_key=True, default=uuid.uuid4, unique=True)
-    conformers = relationship('TrajectoryConformerORM', uselist=True, backref='tr')
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True)
+    conformers = Column(MsgpackExt)
+    # conformers = relationship('TrajectoryConformerORM', uselist=True, backref='trajectory_id')
