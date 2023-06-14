@@ -62,28 +62,6 @@ def check_computation_status(server_info_file=None):
     # print(res)
 
 
-def geometry_optimization_specification():
-    """ Specification for semi-empirical geometry optimization """
-    # Create the spec
-    qc_specifications = QCSpec(
-        method="GFN2-xTB",
-        program="xtb",
-        basis=None,
-        spec_name="odd_se_geometry",
-        spec_description="ODD SE geometry optimization",
-        maxiter=200,
-        keywords={
-            "wcombine": True,
-            "scf_type": "df",
-            "accuracy": 1.0,
-            "electronic_temperature": 300.0,
-            "max_iterations": 50,
-            "solvent": "none", # "water",
-        }
-    )
-
-    return qc_specifications
-
 
 class QCFractalOptDataset:
     """

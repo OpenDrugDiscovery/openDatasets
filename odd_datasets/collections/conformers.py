@@ -172,6 +172,51 @@ def filter_by_rmsd(conformer_states, topology, n_conformers: int = 25):
     return [conformer_states[i] for i in final_states]
 
 
+def rmsd_filtering(mol, threshold=0.1):
+    """ Filter conformers based on RMSD threshold.
+
+    Parameters
+    ----------
+    mol : rdkit.Chem.rdchem.Mol or openff.toolkit.topology.Molecule
+        The molecule which conformers will be filtered.
+
+    threshold : float
+        The RMSD threshold. unit is Angstrom.
+
+    Returns
+    -------
+    mol : rdkit.Chem.rdchem.Mol or openff.toolkit.topology.Molecule
+        The molecule with filtered conformers.
+    """
+
+    is_opemm_mol = isinstance(mol, Molecule)
+    if is_opemm_mol:
+        mol = mol.to_rdkit()
+
+    if mol.GetNumConformers() <= 1:
+        raise ValueError(
+            "The molecule has 0 or 1 conformer. You can generate conformers with `dm.conformers.generate(mol)`."
+        )
+
+    n_confs = mol.GetNumConformers()
+    remaining_confs, keep_confs = list(range(n_confs)), []
+    while len(remaining_confs) > 1:
+        i = remaining_confs[0]
+        tmp = np.array([rdMolAlign.AlignMol(prbMol=mol, refMol=mol, prbCid=i, refCid=j) 
+                        for j in remaining_confs])
+        remaining_confs = np.argwhere(tmp > threshold).flatten()
+        keep_confs.append(i)
+
+    mol =dm.conformers.keep_conformers(mol,indices_to_keep=keep_confs)
+        
+    assert np.all(dm.conformers.rmsd(mol) < threshold)
+
+    if is_opemm_mol:
+        mol = Molecule.from_rdkit(mol, allow_undefined_stereo=False)
+
+    return mol
+
+
 def mol_to_openmm_topology_and_system(mol: Union[str, Molecule], ff_engine: ForceField):
     """
     Initiates a MD simulation system given a molecule and a ForceField.
