@@ -13,6 +13,7 @@ from loguru import logger
 from urllib import request
 from Bio import SeqIO
 from collections import Counter
+from opendata.preprocessing.utils import merge_counters
 
 @click.group()
 def cli():
@@ -42,28 +43,6 @@ def create_kmers_frequency(peptides_with_count, k=10):
             kmers[kmer] += count
         res = Counter(kmers)
     return res 
-
-
-def merge_counters(counters, step=5):
-    """Merge a list of counters into a single counter in parallel using a step size."""
-    def merge_n_counters(x):
-        return sum(x, Counter())
-
-    
-    if len(counters) == 0:
-        return Counter()
-    
-    if len(counters) < step:
-        return merge_n_counters(counters)
-    
-    n = len(counters)
-    res = dm.parallelized(merge_n_counters, 
-                          [counters[i:i+step] for i in range(0, n, step)], 
-                          n_jobs=-1, progress=True, batch_size=1, )
-    
-    res = merge_counters(res)
-
-    return res
 
 
 def filter_by_count(x, min_count=1):
