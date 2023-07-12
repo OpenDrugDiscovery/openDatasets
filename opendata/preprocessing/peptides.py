@@ -8,12 +8,13 @@ import fsspec
 import itertools
 import pandas as pd
 import datamol as dm
+import pickle as pkl
 import urllib.parse as urlparse
 from loguru import logger
 from urllib import request
 from Bio import SeqIO
 from collections import Counter
-from opendata.preprocessing.utils import merge_counters
+from opendata.preprocessing.utils import merge_counters, get_local_cache, get_remote_cache
 
 @click.group()
 def cli():
@@ -58,12 +59,15 @@ def filter_by_count(x, min_count=1):
 
 
 @cli.command()
-@click.option("--cache-folder", default="cache", help="Cache folder where to download the intermediate file and outputs.")
 @click.option("--reviewed-only", is_flag=True, help="Only use reviewed proteins (SwissProt) or not (TrEmbl).")
 @click.option("--min-count", default=1, help="Minimum count of a kmer to be kept.")
-def uniprotkb(cache_folder, reviewed_only=True, min_count=1):
+def uniprotkb(reviewed_only=True, min_count=1):
+    cache_folder = get_local_cache()
     cache_folder = os.path.join(cache_folder, "uniprotkb")
     os.makedirs(cache_folder, exist_ok=True)
+
+    remote_cache, _ = get_remote_cache("peptides", return_filesystem=True)
+    remote_cache = os.path.join(remote_cache, "uniprotkb")
 
     if reviewed_only:
         urls = file_urls[:1]
@@ -118,9 +122,12 @@ def uniprotkb(cache_folder, reviewed_only=True, min_count=1):
         kmers[str(k)] = filter_by_count(kmers[str(k)], min_count=min_count)
 
     # save kmers
-    basename = f"peptides_set_{'reviewed' if reviewed_only else 'unreviewed'}_min_occ_{min_count}.json"
-    with open(os.path.join(cache_folder, basename), "w") as f:
-        json.dump(kmers, f, indent=4, sort_keys=True)
+    basename = f"peptides_set_{'reviewed' if reviewed_only else 'unreviewed'}_min_occ_{min_count}.pkl"
+    with fsspec.open(os.path.join(cache_folder, basename), "wb") as f:
+        pkl.dump(kmers, f)
+
+    with fsspec.open(os.path.join(remote_cache, basename), "wb") as f:
+        pkl.dump(kmers, f)
 
     return kmers
 
@@ -176,8 +183,8 @@ def read_ptm_dict(url, local_file):
 
 
 @cli.command()
-@click.option("--cache-folder", default="cache", help="Cache folder where to download the intermediate file and outputs.")
-def dbptm(cache_folder):
+def dbptm():
+    cache_folder = get_local_cache()
     urls, local_files = remote_and_local_dbptm_files(cache_folder)
     col_headers = ["gene_name", "UniProt ID", "position", "PTM_type", "refs", "sequence"]
 

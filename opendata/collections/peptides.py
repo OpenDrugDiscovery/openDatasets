@@ -16,7 +16,7 @@ import openmm.unit as unit
 from rdkit.Chem import rdMolAlign
 from opendata.collections.utils import flatten_dict
 from openff.toolkit.typing.engines.smirnoff import ForceField
-from opendata.collections.base import QCFractalOptDataset
+from opendata.to_delete.base import QCFractalOptDataset
 from openff.toolkit.topology import Molecule, Topology
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from openff.qcsubmit.common_structures import QCSpec, SCFProperties
@@ -58,8 +58,6 @@ def peptide_to_mol(sequence):
 
 
 
-
-
 class NaturalPeptides(QCFractalOptDataset):
     """Natural peptides dataset.
 
@@ -69,7 +67,7 @@ class NaturalPeptides(QCFractalOptDataset):
 
     """
 
-    NAME = "odd_natural_peptides"
+    NAME = "odd_peptides"
     TAGLINE = "Natural peptides from the UniProt database."
     DESCRIPTION = """This collection contains peptides from the UniProt database.
         The peptides are all at most 10 amino acids long and contain no

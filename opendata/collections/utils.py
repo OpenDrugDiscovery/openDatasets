@@ -18,3 +18,4 @@ def is_callable(func):
     """Check if the object is callable."""
     FUNCTYPES = (types.FunctionType, types.MethodType, functools.partial)
     return func and (isinstance(func, FUNCTYPES) or callable(func))
+

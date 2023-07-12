@@ -1,6 +1,6 @@
 import os
 import sys
-import json
+import h5py
 import time
 import tqdm
 import mdtraj
@@ -18,7 +18,7 @@ from typing import Union, Optional
 from openmm.app import Simulation, PDBFile, DCDReporter, StateDataReporter, LangevinIntegrator, NoCutoff, HBonds, Platform, Modeller
 from openff.toolkit.typing.engines.smirnoff import ForceField
 from openforcefields.generators import SystemGenerator
-from opendata.collections.base import QCFractalOptDataset
+from opendata.to_delete.base import QCFractalOptDataset
 from openff.toolkit.topology import Molecule, Topology
 
 
@@ -161,5 +161,6 @@ class RefinedSetProteinLigand(QCFractalOptDataset):
 
 
 
-
+if __name__ == "__main__":
+    pass
 

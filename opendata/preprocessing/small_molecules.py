@@ -1,6 +1,7 @@
 import os
 import csv
 import wget
+import glob
 import click
 import fsspec
 import numpy as np
@@ -14,7 +15,7 @@ from rdkit import Chem
 import fsspec.implementations.ftp
 from rdkit.Chem.Descriptors import MolWt
 from rdkit import RDLogger
-from opendata.preprocessing.utils import merge_counters
+from opendata.preprocessing.utils import merge_counters, get_local_cache, get_remote_cache, caching_wrapper
 
 RDLogger.DisableLog('rdApp.*')
 
@@ -23,69 +24,65 @@ RDLogger.DisableLog('rdApp.*')
 def cli():
     pass
 
+cache_dir = get_local_cache()
+remote_dir, remote_fs = get_remote_cache("small_molecules", return_filesystem=True)
 
-remote_cache = "gs://opendatasets/small_molecule_collections"
-gcs = fsspec.filesystem("gs")
 
-def _load_one_(f_url, cache_dir, verbose=0):
-    basename, dname = f_url.split('/')[-1], cache_dir.split('/')[-1]
+def _load_one_(dname, f_url, local_path):
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    if not os.path.exists(local_path):
+        try:
+            wget.download(f_url, local_path)
+            # ftpfs.download(f_url, data_local_cache_path)
+        except Exception as e:
+            logger.warning(f"Error {e} for {f_url}")
+            return []
+
+    with fsspec.open(local_path, compression="gzip") as fd:
+        with dm.without_rdkit_log():
+            if dname == "surechembl":
+                df = dm.read_csv(fd, sep="\t")
+                res = df.SMILES.to_list()
+            elif dname == "mcule":
+                df = dm.read_csv(fd, sep="\t")
+                res = df.iloc[:, 0].to_list()
+            elif dname == "chembl":
+                df = dm.read_csv(fd, sep="\t")
+                res = df.canonical_smiles.to_list()
+            elif dname == "pubchem":
+                df = dm.read_sdf(fd, as_df=True)
+                print(df.head())
+                res = df["smiles"].to_list()
+            else:
+                raise NotImplementedError()
+    return res
+            
+
+def _load_one_cache_(f_url, local_cache_dir, verbose=0):
+    basename, dname = f_url.split('/')[-1], local_cache_dir.split('/')[-1]
     basebase = basename.split('.')[0]
 
-    data_local_cache_path = os.path.join(cache_dir, basename)
-    result_local_cache_path = os.path.join(cache_dir, basebase)
-    gcs_path = os.path.join(remote_cache, basebase)
-    if os.path.exists(result_local_cache_path):
-        with fsspec.open(result_local_cache_path, "rb") as fd:
-            res = pkl.load(fd)
-    elif gcs.exists(gcs_path):
-        with fsspec.open(result_local_cache_path, "rb") as fd:
-            res = pkl.load(fd)
-    else:
-        if not os.path.exists(data_local_cache_path):
-            try:
-                wget.download(f_url, data_local_cache_path)
-                # ftpfs.download(f_url, data_local_cache_path)
-            except Exception as e:
-                logger.warning(f"Error {e} for {f_url}")
-                return []
+    data_local_path = os.path.join(local_cache_dir, basename)
+    result_local_path = os.path.join(local_cache_dir, basebase)
+    gcs_path = os.path.join(remote_dir, basebase)
 
-        with fsspec.open(data_local_cache_path, compression="gzip") as fd:
-            with dm.without_rdkit_log():
-                if dname == "surechembl":
-                    df = dm.read_csv(fd, sep="\t")
-                    res = df.SMILES.to_list()
-                elif dname == "mcule":
-                    df = dm.read_csv(fd, sep="\t")
-                    res = df.iloc[:, 0].to_list()
-                elif dname == "chembl":
-                    df = dm.read_csv(fd, sep="\t")
-                    res = df.canonical_smiles.to_list()
-                elif dname == "pubchem":
-                    df = dm.read_sdf(fd, as_df=True)
-                    print(df.head())
-                    res = df["smiles"].to_list()
-                else:
-                    raise NotImplementedError()
-        with fsspec.open(result_local_cache_path, "wb") as fd:
-            pkl.dump(res, fd)
-
-        with fsspec.open(gcs_path, "wb") as fd:
-            pkl.dump(res, fd)
+    res = caching_wrapper(_load_one_, dname, f_url, data_local_path,
+                          local_path=result_local_path, 
+                          remote_path=gcs_path, remote_filesystem=remote_fs)
 
     if verbose:
         logger.info(f"Nb molecules in {f_url.split('/')[-1]}: {len(res)}")
     return res
 
 
-def load_surechembl(cache_dir, verbose=0, n_jobs=-1):
-    os.makedirs(cache_dir, exist_ok=True)
+def load_surechembl(local_cache_dir, verbose=0, n_jobs=-1):
     ftp_url = "ftp.ebi.ac.uk/pub/databases/chembl/SureChEMBL/data/SureChEMBL*.txt.gz"
     base, tail = ftp_url.split('/')[0], '/'.join(ftp_url.split('/')[1:])
     ftpfs = fsspec.implementations.ftp.FTPFileSystem(base, timeout=300)
     f_tails = ftpfs.glob(tail)
     all_smiles = set()
     f_urls = ["https://" + base + f_tail for f_tail in f_tails] #[-2:]
-    f = lambda x: _load_one_(x, cache_dir=cache_dir, verbose=verbose)
+    f = lambda x: _load_one_cache_(x, local_cache_dir=local_cache_dir, verbose=verbose)
     res = dm.parallelized(f, f_urls, n_jobs=1)
 
     all_smiles = set()
@@ -94,14 +91,13 @@ def load_surechembl(cache_dir, verbose=0, n_jobs=-1):
     return list(all_smiles)
 
 
-def load_pubchem(cache_dir, verbose=0, n_jobs=-1):
-    os.makedirs(cache_dir, exist_ok=True)
+def load_pubchem(local_cache_dir, verbose=0, n_jobs=-1):
     ftp_url = "ftp.ncbi.nlm.nih.gov/pubchem/Compound/CURRENT-Full/SDF/*sdf.gz"
     base, tail = ftp_url.split('/')[0], '/'.join(ftp_url.split('/')[1:])
     ftpfs = fsspec.implementations.ftp.FTPFileSystem(base, timeout=300)
     f_tails = ftpfs.glob(tail)
     f_urls = ["https://" + base + f_tail for f_tail in f_tails] #[:2]
-    f = lambda x: _load_one_(x, cache_dir=cache_dir, verbose=verbose)
+    f = lambda x: _load_one_cache_(x, local_cache_dir=local_cache_dir, verbose=verbose)
     res = dm.parallelized(f, f_urls, n_jobs=4)
     all_smiles = set()
     for x in res:
@@ -109,68 +105,68 @@ def load_pubchem(cache_dir, verbose=0, n_jobs=-1):
     return list(all_smiles)
 
 
-def load_mcule(cache_dir, verbose=0, n_jobs=-1):
+def load_mcule(local_cache_dir, verbose=0, n_jobs=-1):
     url = "https://mcule.s3.amazonaws.com/database/mcule_purchasable_full_230323.smi.gz"
-    return _load_one_(url, cache_dir=cache_dir, verbose=verbose)
+    return _load_one_cache_(url, local_cache_dir=local_cache_dir, verbose=verbose)
 
 
 
-def load_chembl(cache_dir, verbose=0, n_jobs=-1):
+def load_chembl(local_cache_dir, verbose=0, n_jobs=-1):
     url = "https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/chembl_33_chemreps.txt.gz"
-    return _load_one_(url, cache_dir=cache_dir, verbose=verbose)
+    return _load_one_cache_(url, local_cache_dir=local_cache_dir, verbose=verbose)
 
 
-def load_datasets(cache_dir, flatten=False, verbose=0, n_jobs=-1):
+def _load_all_datasets_(cache_dir, flatten=False, verbose=0, n_jobs=-1):
     unichem_db_urls = dict( 
         pubchem=load_pubchem,
         surecheml=load_surechembl,
         mcule=load_mcule,
         chembl=load_chembl,
     )
-    os.makedirs(cache_dir, exist_ok=True)
-    basename = f"unichem_{'non' if flatten else ''}flatten.pkl"
-    local_cache_path = os.path.join(cache_dir, basename)
-    gcs_path = os.path.join(remote_cache, basename)
+    all_smiles = set() if flatten else dict()
+    for db_name, fn_loader in unichem_db_urls.items():
+        db_local_cache = os.path.join(cache_dir, f"{db_name}.pkl")
+        db_remote_path = os.path.join(remote_dir, f"{db_name}.pkl")
 
-    if os.path.exists(local_cache_path):
-        with fsspec.open(local_cache_path, "rb") as fd:
-            all_smiles = pkl.load(fd)
-    elif gcs.exists(gcs_path):
-        with fsspec.open(local_cache_path, "rb") as fd:
-            all_smiles = pkl.load(fd)
-    else:
-        all_smiles = set() if flatten else dict()
-        for db_name, fn_loader in unichem_db_urls.items():
-            local_cache = os.path.join(cache_dir, f"{db_name}.pkl")
-            if os.path.exists(local_cache):
-                with fsspec.open(local_cache, "rb") as fd:
-                    smiles = pkl.load(fd)
+        smiles = caching_wrapper(fn_loader, 
+                                 os.path.join(cache_dir, db_name),
+                                 local_path=db_local_cache, 
+                                 remote_path=db_remote_path,
+                                 remote_filesystem=remote_fs,
+                                 verbose=verbose, n_jobs=n_jobs)
+
+        if verbose:
+            logger.info(f"Nb molecules in {db_name}: {len(smiles)}")
+
+        if flatten:
+            if len(all_smiles) == 0:
+                all_smiles = set(smiles)
             else:
-                smiles =  fn_loader(cache_dir=os.path.join(cache_dir, db_name), 
-                                    verbose=verbose, n_jobs=n_jobs)
-                with fsspec.open(local_cache, "wb") as fd:
-                    pkl.dump(smiles, fd)
-            if verbose:
-                logger.info(f"Nb molecules in {db_name}: {len(smiles)}")
+                all_smiles.update(smiles)
+        else:
+            all_smiles[db_name] = smiles
 
-            if flatten:
-                if len(all_smiles) == 0:
-                    all_smiles = set(smiles)
-                else:
-                    all_smiles.update(smiles)
-            else:
-                all_smiles[db_name] = smiles
-        with fsspec.open(local_cache_path, "wb") as fd:
-            pkl.dump(all_smiles, fd)
-
-        with fsspec.open(gcs_path, "wb") as fd:
-            pkl.dump(all_smiles, fd)
     return all_smiles
 
 
-def expansion_by_fragment_decomposition(list_smiles: List[str],
-                                        max_mol_weight: float=1000.0,
-                                        max_frag_weight: float=300.0) -> List[str]:
+def load_datasets(flatten=False, verbose=0, n_jobs=-1):
+
+    basename = f"unichem_{'non' if flatten else ''}_flatten.pkl"
+    local_path = os.path.join(cache_dir, basename)
+    remote_path = os.path.join(remote_dir, basename)
+
+    return caching_wrapper(_load_all_datasets_, cache_dir, 
+                           flatten=flatten, 
+                           verbose=verbose, 
+                           n_jobs=n_jobs,
+                           remote_path=remote_path, 
+                           local_path=local_path,
+                           remote_filesystem=remote_fs)
+
+
+def _fragmentation_(list_smiles: List[str],
+                    max_mol_weight: float=1000.0,
+                    max_frag_weight: float=300.0) -> List[str]:
     res = Counter()
     for smi in list_smiles:
         try:
@@ -193,39 +189,26 @@ def expansion_by_fragment_decomposition(list_smiles: List[str],
     return res
 
 
-def expansion_by_iso_tautomerization(list_smiles: List[str], 
-                                      max_isomers: int=10, 
-                                      max_tautomers: int=10):
-    res = Counter()
-    for smi in list_smiles:
-        try:
-            mol = dm.to_mol(smi)
-            if mol is None:
-                continue
+def expansion_by_fragment_decomposition(smiles_list,
+                    max_mol_weight: float=1000.0,
+                    max_frag_weight: float=300.0):
+    f = lambda x: [_fragmentation_(x, max_mol_weight, max_frag_weight)]
+    res = dm.parallelized_with_batches(f, smiles_list, batch_size=256, n_jobs=-1, progress=True)
+    res = merge_counters(res, step=5, verbose=0)
+    logger.info(f"Nb fragments: {len(res)}")
+    return res
 
-            with dm.without_rdkit_log():
-                isomers = dm.enumerate_stereoisomers(mol, n_variants=max_isomers, 
-                                                    undefined_only=False, rationalise=True, 
-                                                    timeout_seconds=30)
-                tautomers = dm.enumerate_tautomers(mol,n_variants=max_tautomers)
-                it_smiles = [dm.to_smiles(x) for x in isomers+tautomers]
-                res.update(Counter(it_smiles))
-        except:
-            pass        
-    return res    
 
-@click.command()
-@click.option("--cache_dir", type=str, help="Path to cache directory.")
+@cli.command()
+@click.option("--chunk-id", type=int,  help="chunk id starting at 0")
+@click.option("--chunk-size", type=int, default=1000000, help="Chunk size to divide and conquer.")
 @click.option("--max-mol-weight", type=float, default=1000.0, help="Maximum molecular weight (default: 1000.0 dA).")
 @click.option("--max-frag-weight", type=float, default=300.0, help="Maximum fragment weight (default: 300.0 dA).")
-@click.option("--max-isomers", type=int, default=10, help="Maximum number of isomers to enumerate (default: 10).")
-@click.option("--max-tautomers", type=int, default=5, help="Maximum number of tautomers to enumerate (default: 5).")
-def preprocess_datasets(
-        cache_dir,
+def fragmentation(
+        chunk_id,
+        chunk_size,
         max_mol_weight: float=500.0, 
-        max_frag_weight: float=250.0,
-        max_isomers: int=10,
-        max_tautomers: int=5) -> None:
+        max_frag_weight: float=250.0) -> None:
     """
     Load unichem molecules and expand them by fragment decomposition and
     stereoisomer + tautomer enumeration.
@@ -238,27 +221,147 @@ def preprocess_datasets(
         max_isomers (int): Maximum number of isomers to enumerate.
         max_tautomers (int): Maximum number of tautomers to enumerate.
     """
-    all_smiles = load_datasets(cache_dir, flatten=True, verbose=1, n_jobs=-1)
-    logger.info(f"Nb molecules: {len(all_smiles)}")
 
-    all_smiles = list(all_smiles)
-    logger.info("Expanding molecules...")
-    f = lambda x: [expansion_by_fragment_decomposition(x, max_mol_weight, max_frag_weight)]
-    res = dm.parallelized_with_batches(f, all_smiles, batch_size=256, n_jobs=-1, progress=True)
-    res = merge_counters(res, step=5, verbose=0)
-    logger.info(f"Nb fragments: {len(res)}")
-    with fsspec.open(os.path.join(cache_dir, "raw_fragments.pkl"), "wb") as fd:
-        pkl.dump(res, fd)
+    all_smiles = load_datasets(flatten=True, verbose=1, n_jobs=-1)
+    n_total = len(all_smiles)
+    logger.info(f"Nb molecules: {n_total}")
+    
+    start_idx, end_idx = chunk_id * chunk_size, (chunk_id+1) * chunk_size
+    if start_idx > n_total:
+        logger.info("Chunk ID exceed the maximum number of samples")
+    else:
+        fname = f"raw_fragments_{start_idx}_{end_idx}.pkl"
+        local_file = os.path.join(cache_dir, "unichem", fname)
+        remote_file = os.path.join(remote_dir, "unichem", fname)
 
-    logger.info("Expanding fragments...")
-    f = lambda x: [expansion_by_iso_tautomerization(x, max_isomers, max_tautomers)]
-    res = dm.parallelized_with_batches(f, res.keys(), batch_size=64, n_jobs=-1, progress=True)
+        all_smiles = list(all_smiles)[start_idx:end_idx]
+        logger.info(f"Expanding molecules from {start_idx}_{end_idx}...")
+        caching_wrapper(expansion_by_fragment_decomposition,
+                        all_smiles,
+                        max_mol_weight=max_mol_weight,
+                        max_frag_weight = max_frag_weight,
+                        local_path=local_file,
+                        remote_path=remote_file,
+                        remote_filesystem=remote_fs)
+
+
+def _load_fragment_collection_(include_iso_tauto=False):
+    fname = f"fragments_with_stereo_and_tauto_*.pkl" if include_iso_tauto else "raw_fragments*.pkl"
+    local_files = glob.glob(os.path.join(cache_dir, "unichem", fname))
+    remote_files = remote_fs.glob(os.path.join(remote_dir, "unichem", fname))
+    fnames = local_files if len(local_files) else remote_files
+    all_res = []
+    if len(fnames):
+        for fname in fnames:
+            with fsspec.open(fname, "rb") as fd:
+                res = pkl.load(fd)
+            all_res.append(res)
+    res = merge_counters(all_res, step=5)
+    return res
+
+def load_fragment_collection(include_iso_tauto=False):
+    fname = f"all_iso_tauto_fragments.pkl" if include_iso_tauto else f"all_raw_fragments.pkl" 
+    local_file = os.path.join(cache_dir, fname)
+    remote_file = os.path.join(remote_dir, fname)
+    res = caching_wrapper(_load_fragment_collection_,
+                    local_path=local_file,
+                    remote_path=remote_file,
+                    remote_filesystem=remote_fs
+    )
+    logger.info(f"Fragment collection size: {len(res)}")
+
+    return res
+
+
+def _iso_tautomerization_(list_smiles: List[str], 
+                        max_isomers: int=10, 
+                        max_tautomers: int=10,
+                        iso: bool=True):
+    res = Counter()
+    for smi in list_smiles:
+        try:
+            mol = dm.to_mol(smi)
+            if mol is None:
+                continue
+
+            with dm.without_rdkit_log():
+                if iso:
+                    enums = dm.enumerate_stereoisomers(mol, n_variants=max_isomers, 
+                                                        undefined_only=False, rationalise=True, 
+                                                        timeout_seconds=30)
+                else:
+                    enums = dm.enumerate_tautomers(mol,n_variants=max_tautomers)
+                it_smiles = [dm.to_smiles(x) for x in enums]
+                res.update(Counter(it_smiles))
+        except:
+            pass        
+    return res    
+
+
+def expansion_by_iso_tautomerization(list_smiles: List[str], 
+                                      max_isomers: int=10, 
+                                      max_tautomers: int=10):
+    f = lambda x: [_iso_tautomerization_(x, max_isomers, max_tautomers)]
+    res = dm.parallelized_with_batches(f, list_smiles, batch_size=256, n_jobs=-1, progress=True)
     res = merge_counters(res, step=5, verbose=0)
     logger.info(f"Nb extended fragments: {len(res)}")
-    with fsspec.open(os.path.join(cache_dir, "fragments_with_stereo_and_tauto.pkl"), "wb") as fd:
-        pkl.dump(res, fd)
+    return res
 
 
+@cli.command()
+@click.option("--chunk-id", type=int,  help="chunk id starting at 0")
+@click.option("--chunk-size", type=int, default=1000000, help="Chunk size to divide and conquer.")
+@click.option("--max-isomers", type=int, default=10, help="Maximum number of isomers to enumerate (default: 10).")
+@click.option("--max-tautomers", type=int, default=5, help="Maximum number of tautomers to enumerate (default: 5).")
+def iso_and_tauto(
+        chunk_id,
+        chunk_size,
+        max_isomers: int=10,
+        max_tautomers: int=5) -> None:
+    """
+    Load unichem molecules and expand them by fragment decomposition and
+    stereoisomer + tautomer enumeration.
 
+    Args:
+        in_fname (str): Path to input file.
+        out_fname (str): Path to output file.
+        max_isomers (int): Maximum number of isomers to enumerate.
+        max_tautomers (int): Maximum number of tautomers to enumerate.
+    """
+
+    res = load_fragment_collection(include_iso_tauto=False)
+
+    all_smiles = list(res.keys())
+    n_total = len(all_smiles)
+    logger.info(f"Nb molecules: {n_total}")
+    
+    start_idx, end_idx = chunk_id * chunk_size, (chunk_id+1) * chunk_size
+    if start_idx > n_total:
+        logger.info("Chunk ID exceed the maximum number of samples")
+    else:
+        fname = f"fragments_with_stereo_and_tauto_{start_idx}_{end_idx}.pkl"
+        local_file = os.path.join(cache_dir, "unichem", fname)
+        remote_file = os.path.join(remote_dir, "unichem", fname)
+
+        logger.info(f"Expanding fragments by isomerization and tautomerization...")
+        all_smiles = all_smiles[start_idx:end_idx]
+
+        caching_wrapper(expansion_by_iso_tautomerization,
+                        all_smiles,
+                        max_isomers=max_isomers,
+                        max_tautomers=max_tautomers,
+                        local_path=local_file,
+                        remote_path=remote_file,
+                        remote_filesystem=remote_fs)
+
+
+@cli.command()
+def collect_frags():
+    load_fragment_collection(include_iso_tauto=False)
+
+@cli.command()
+def collect_iso_tauto_frags():
+    load_fragment_collection(include_iso_tauto=True)
+    
 if __name__ == "__main__":
-    preprocess_datasets(cache_dir="/storage/shared_data/prudencio/odd/cache")
+    cli()
