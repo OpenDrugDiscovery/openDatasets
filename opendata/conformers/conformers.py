@@ -9,7 +9,7 @@ from typing import Union, Optional
 import openmm.unit as unit
 from openmm import app, State
 from openmm.unit import Quantity
-from opendata.collections.utils import flatten
+from opendata.utils import flatten
 from openff.toolkit.utils.exceptions import (
     UnassignedValenceParameterException,
     UnassignedProperTorsionParameterException,

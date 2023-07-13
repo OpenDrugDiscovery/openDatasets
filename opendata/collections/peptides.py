@@ -14,7 +14,7 @@ import qcengine as qcng
 import qcelemental as qcel
 import openmm.unit as unit
 from rdkit.Chem import rdMolAlign
-from opendata.collections.utils import flatten_dict
+from opendata.utils import flatten_dict
 from openff.toolkit.typing.engines.smirnoff import ForceField
 from opendata.to_delete.base import QCFractalOptDataset
 from openff.toolkit.topology import Molecule, Topology

@@ -152,7 +152,6 @@ def submit_sm_test():
         username=os.environ["OPENFRACTAL_USERNAME"],
         password=os.environ["OPENFRACTAL_PASSWORD"],
     )
-    exit()
     res = load_fragment_collection(include_iso_tauto=False)
     all_smiles = list(res.keys())
     idxs = np.random.choice(len(all_smiles), replace=False, size=500)

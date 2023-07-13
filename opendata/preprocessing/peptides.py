@@ -14,7 +14,7 @@ from loguru import logger
 from urllib import request
 from Bio import SeqIO
 from collections import Counter
-from opendata.preprocessing.utils import merge_counters, get_local_cache, get_remote_cache
+from opendata.utils import merge_counters, get_local_cache, get_remote_cache
 
 @click.group()
 def cli():

@@ -15,7 +15,7 @@ from rdkit import Chem
 import fsspec.implementations.ftp
 from rdkit.Chem.Descriptors import MolWt
 from rdkit import RDLogger
-from opendata.preprocessing.utils import merge_counters, get_local_cache, get_remote_cache, caching_wrapper
+from opendata.utils import merge_counters, get_local_cache, get_remote_cache, caching_wrapper
 
 RDLogger.DisableLog('rdApp.*')
 

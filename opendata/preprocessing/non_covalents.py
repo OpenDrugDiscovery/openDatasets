@@ -16,7 +16,7 @@ from urllib import request
 from Bio import SeqIO
 from rdkit import Chem
 from collections import Counter
-from opendata.preprocessing import utils 
+from opendata import utils 
 
 
 file_urls = [
@@ -244,7 +244,7 @@ def get_misato():
     np.random.shuffle(complex_codes)
     print(len(complex_codes))
     for code in complex_codes[:300]:
-        parse_misato_entries(code, md_data, 0)
+        MisatoMD(code, md_data, 0)
 
 
 def create_pdbbind_set(cache_folder):

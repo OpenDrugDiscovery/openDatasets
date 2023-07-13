@@ -32,8 +32,8 @@ class ReplicaExchange:
         system,
         positions,
         out_filepath,
-        total_time=1.0 * unit.picosecond,
-        step_time=None,
+        total_time=10.0 * unit.picosecond,
+        step_time=1.0 * unit.femtosecond,
         temperatures=None,
         friction=1.0 / unit.picosecond,
         minimize=True,
@@ -89,7 +89,16 @@ class ReplicaExchange:
         x = analyzer.read_energies()
         replica_energies, replica_state_indices = x[0], x[3]
 
+        temperatures = [s.temperature for s in states]
+        beta_k = np.array([ 1 / (kB * temp._value) for temp in temperatures])
+        replica_energies *= (beta_k ** (-1))[None, :, None]
+
+        print(replica_energies.shape)
+        print(replica_state_indices.shape)
+
         traj = self.get_trajectory()
+        print(traj.shape)
+        exit()
 
         return dict(reporter=reporter,
                     states=states,
@@ -159,25 +168,15 @@ class ReplicaExchange:
             logger.info("Replica exchange simulation failed! Verify your simulation settings.")
             simulation = None
             
-        return simulation
+        self.simulation = simulation
  
-    def get_trajectory(self, replica_index=None):
+    def get_trajectory(self):
         """
-        Extract trajectory for specific replica from reporter file,
+        Extract trajectory from reporter file as a (n_frames, n_replicate, n_atoms, 3) array
         """
         all_pos = self.reporter._storage_checkpoint.variables['positions']
-        n_frames, n_atoms = all_pos.shape[0], all_pos.shape[2]     
-            
-        # Initialize positions and box vectors arrays.
-        # MDTraj Cython code expects float32 positions.
-        positions = np.zeros((n_frames, n_atoms, 3), dtype=np.float32)
+        return all_pos[:, :, :, :].astype(np.float32)
 
-        # Extract replica positions
-        for i, iteration in enumerate(range(n_frames)):
-            positions[i, :, :] = all_pos[iteration, replica_index, :, :].astype(np.float32)
-
-        return positions
-       
     def process_replica_exchange_data(self,
         output_data="output/output.nc", output_directory="output", series_per_page=4,
         write_data_file=True, plot_production_only=False, print_timing=False,
@@ -426,7 +425,7 @@ class ReplicaExchange:
 
         return (replica_energies, replica_state_indices, production_start, sample_spacing, n_transit, mixing_stats)
         
-    def restart(self, out_filepath):
+    def restart(self):
 
         """
         Restart an OpenMMTools replica exchange simulation using an OpenMM model and
@@ -436,13 +435,13 @@ class ReplicaExchange:
         :type output_data: str
         """
 
-        reporter = MultiStateReporter(out_filepath, open_mode="r+")
+        reporter = MultiStateReporter(self.out_filepath, open_mode="r+")
         simulation = ReplicaExchangeSampler.from_storage(reporter)
 
         n_iter_remain = self.exchange_attempts - simulation.iteration
 
         simulation.extend(n_iterations=n_iter_remain)
-        return simulation
+        self.simulation = simulation
                 
     def get_minimum_energy_ensemble(self):
 
@@ -479,17 +478,17 @@ class ReplicaExchange:
 
         ensemble = []
         ensemble_energies = []
-        for replica in range(len(replica_energies)):
-            energies = np.array([energy for energy in replica_energies[replica][replica]])
+        for replica in range(len(r_energies)):
+            energies = np.array([energy for energy in r_energies[replica][replica]])
             for energy in range(len(energies)):
                 if len(ensemble) < ensemble_size:
-                    ensemble.append(replica_positions[replica][energy])
+                    ensemble.append(r_positions[replica][energy])
                     ensemble_energies.append(energies[energy])
                 else:
                     for comparison in range(len(ensemble_energies)):
                         if energies[energy] < ensemble_energies[comparison]:
                             ensemble_energies[comparison] = energies[energy]
-                            ensemble[comparison] = replica_positions[replica][energy]
+                            ensemble[comparison] = r_positions[replica][energy]
 
         return ensemble
 
@@ -790,5 +789,48 @@ class ReplicaExchange:
     
 
 if __name__ == "__main__":
-    pass
+    import datamol as dm
+    from openff.toolkit.typing.engines.smirnoff import ForceField
+    from openff.toolkit.topology import Molecule, Topology
+    from opendata.conformers.conformers import mol_to_openmm_topology_and_system
+    from opendata import utils
+
+    smi = "CC(=O)NC1=CC=C(C=C1)O"
+    ff_engine = ForceField("openff_unconstrained-2.0.0.offxml")
+
+    # Parameterize the system
+    mol = Molecule.from_smiles(smi, allow_undefined_stereo=True)
+    ret = mol_to_openmm_topology_and_system(mol, ff_engine)
+
+    topology, system = ret
+    # Generating {n_starting_points} starting points
+    mol.generate_conformers(n_conformers=1, rms_cutoff=None)
+
+    positions = mol.conformers[0].to_openmm()
+
+    cache = utils.get_local_cache()
+    opath = os.path.join(cache, "replicate_test")
+    print(positions)
+
+    re = ReplicaExchange(topology=topology, system=system, positions=positions, out_filepath=opath)
+    re()
+    print(re.n_replica)
+    print(re.n_steps)
+    print(re.exchange_attempts)
+    d = re.reporter_to_dict()
+    for x, k in d.items():
+        print(x, k)
+    print()
+    exit()
+
+    fn = lambda xt: md_simulate_conformers(xt[0].to_openmm(), temperature=xt[1] * unit.kelvin, 
+                                            topology=topology, system=system)
+    all_conformers = dm.utils.parallelized(
+        fn,
+        [(x, t) for x in mol.conformers.get for t in temperatures ],
+        progress=True,
+    )
+    all_conformers = flatten(all_conformers)
+
+
 
