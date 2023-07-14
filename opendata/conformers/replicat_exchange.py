@@ -20,6 +20,8 @@ from openmmtools.multistate import (MultiStateReporter,
                                     ReplicaExchangeAnalyzer,
                                     ReplicaExchangeSampler)
 
+print("test")
+
 # quiet down some citation spam
 MultiStateSampler._global_citation_silence = True
 
