@@ -93,12 +93,12 @@ class ReplicaExchange:
         beta_k = np.array([ 1 / (kB * temp._value) for temp in temperatures])
         replica_energies *= (beta_k ** (-1))[None, :, None]
 
-        print(replica_energies.shape)
-        print(replica_state_indices.shape)
+        # print(replica_energies.shape)
+        # print(replica_state_indices.shape)
 
         traj = self.get_trajectory()
-        print(traj.shape)
-        exit()
+        # print(traj.shape)
+        # exit()
 
         return dict(reporter=reporter,
                     states=states,
