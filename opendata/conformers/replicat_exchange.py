@@ -323,7 +323,7 @@ class ReplicaExchange:
         t14 = time.perf_counter()
         
         if plot_production_only==True:
-            plot_energies(
+            self.plot_energies(
                 state_energies[:,production_start:],
                 temperatures,
                 series_per_page,
@@ -332,13 +332,13 @@ class ReplicaExchange:
                 file_name=f"{output_directory}/rep_ex_ener.pdf",
             )
             
-            plot_energy_histograms(
+            self.plot_energy_histograms(
                 state_energies[:,production_start:],
                 temperatures,
                 file_name=f"{output_directory}/rep_ex_ener_hist.pdf",
             )
 
-            plot_summary(
+            self.plot_summary(
                 replica_state_indices[:,production_start:],
                 temperatures,
                 series_per_page,
@@ -347,13 +347,13 @@ class ReplicaExchange:
                 file_name=f"{output_directory}/rep_ex_states.pdf",
             )
             
-            plot_matrix(
+            self.plot_matrix(
                 replica_state_indices[:,production_start:],
                 file_name=f"{output_directory}/state_probability_matrix.pdf",
             )
             
         else:
-            plot_energies(
+            self.plot_energies(
                 state_energies,
                 temperatures,
                 series_per_page,
@@ -361,13 +361,13 @@ class ReplicaExchange:
                 file_name=f"{output_directory}/rep_ex_ener.pdf",
             )
             
-            plot_energy_histograms(
+            self.plot_energy_histograms(
                 state_energies,
                 temperatures,
                 file_name=f"{output_directory}/rep_ex_ener_hist.pdf",
             )
 
-            plot_summary(
+            self.plot_summary(
                 replica_state_indices,
                 temperatures,
                 series_per_page,
@@ -375,7 +375,7 @@ class ReplicaExchange:
                 file_name=f"{output_directory}/rep_ex_states.pdf",
             )
             
-            plot_matrix(
+            self.plot_matrix(
                 replica_state_indices,
                 file_name=f"{output_directory}/state_probability_matrix.pdf",
             )

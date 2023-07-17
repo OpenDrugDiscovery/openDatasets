@@ -8,7 +8,7 @@ from scipy import spatial
 import datamol as dm
 import numpy as np
 
-from rdkit.Chem import rdDepictor
+from rdkit.Chem import rdDepictor # type: ignore
 
 import pdbfixer
 
@@ -84,7 +84,7 @@ def prepare_inputs(
     # Save the original PDB file to the datum directory
     full_input_pdb_path = dm.fs.join(datum_data_dir, "original.pdb")
     with fsspec.open(full_input_pdb_path, "w") as f:
-        app.PDBFile.writeFile(input_pdb.topology, input_pdb.positions, f, keepIds=True)
+        app.PDBFile.writeFile(input_pdb.topology, input_pdb.positions, f, keepIds=True) # type: ignore
 
     ## Step 1: use the already extracted ligand SDF file
 
@@ -159,4 +159,4 @@ def prepare_inputs(
     # Save the pocket PDB file
     pocket_path = dm.fs.join(datum_data_dir, "pocket.pdb")
     with fsspec.open(pocket_path, "w") as f:
-        app.PDBFile.writeFile(modeller.topology, modeller.positions, f, keepIds=True)
+        app.PDBFile.writeFile(modeller.topology, modeller.positions, f, keepIds=True) # type: ignore
