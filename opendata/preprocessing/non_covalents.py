@@ -150,7 +150,7 @@ def get_misato():
         fd = fd.open()
     md_data = h5py.File(fd)
     complex_codes = list(md_data.keys())
-    np.random.shuffle(complex_codes)
+    # np.random.shuffle(complex_codes)
     for code in complex_codes:
         m = MisatoMDFrame(code, md_data, 0)
         fname = m.write_pdb(m_cache_dir)

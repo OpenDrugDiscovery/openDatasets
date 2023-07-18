@@ -32,10 +32,11 @@ class PocketExtractor(BaseModel):
         5.0, description="the distance cutoff to use to extract the pocket in Angstrom."
     )
     remove_water: bool = Field(True, description="whether to remove water molecules or not.")
-    add_hs: bool = Field(True, description="whether to add hydrogens or not.")
 
     def __call__(self, modeller: Modeller, filepath="modfied_pdb.pdb", save_pdb: bool = False):
-        modified_modeller = extract_pocket(modeller, self.distance_cutoff, self.remove_water, self.add_hs)
+        modified_modeller = extract_pocket(modeller, self.distance_cutoff, self.remove_water)
+        if modified_modeller is None:
+            return None
         if save_pdb:
             with fsspec.open(filepath, "w") as f:
                 app.PDBFile.writeFile(
@@ -126,6 +127,8 @@ def extract_pocket(modeller: Modeller, distance_cutoff=5.0, remove_water=True):
     # Get the positions of the ligand
     traj = trajectory(modeller)
     ligand_idx = get_indexs_mol(traj)
+    if ligand_idx is None:
+        return None
     ligand_pos = traj.xyz[0][ligand_idx] * 10  # type: ignore
 
     # Get the positions of the target
@@ -165,4 +168,7 @@ def get_indexs_mol(trajectory: md.Trajectory, resname: str = "MOL") -> list[int]
         if idx.size == 0:
             logger.error("Selection not found for resname: {resname}")
             raise ValueError
-    return idx.tolist()
+        res = idx.tolist()
+    else:
+        res = None
+    return res

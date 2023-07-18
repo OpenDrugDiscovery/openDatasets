@@ -15,16 +15,74 @@ from pymbar import timeseries
 from openmm.app.pdbfile import PDBFile
 from matplotlib.backends.backend_pdf import PdfPages
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from mdtraj import Topology, Trajectory
 from openmmtools.multistate import (MultiStateReporter, 
                                     MultiStateSampler,
                                     ReplicaExchangeAnalyzer,
                                     ReplicaExchangeSampler)
+
+print("test")
 
 # quiet down some citation spam
 MultiStateSampler._global_citation_silence = True
 
 kB = (unit.MOLAR_GAS_CONSTANT_R).in_units_of(unit.kilojoule / (unit.kelvin * unit.mole))
 
+def extract_trajectory(
+    topology, reporter,
+    state_index=None, replica_index=None,
+    frame_begin=0, frame_stride=1, frame_end=-1):
+    """
+    Internal function for extract trajectory (replica or state) from .nc file,
+    Based on YANK extract_trajectory code.
+    """
+
+    # Get dimensions
+    trajectory_storage = reporter._storage_checkpoint  
+    n_iterations = reporter.read_last_iteration()
+    n_frames = trajectory_storage.variables['positions'].shape[0]
+    n_atoms = trajectory_storage.variables['positions'].shape[2]
+    
+    # Determine frames to extract.
+    # Convert negative indices to last indices.
+    if frame_begin < 0:
+        frame_begin = n_frames + frame_begin
+    if frame_end < 0:
+        frame_end = n_frames + frame_end + 1
+    frame_indices = range(frame_begin, frame_end, frame_stride)
+    if len(frame_indices) == 0:
+        raise ValueError('No frames selected')
+        
+    # Determine the number of frames that the trajectory will have.
+    if state_index is None:
+        n_trajectory_frames = len(frame_indices)        
+    else:
+        # With SAMS, an iteration can have 0 or more replicas in a given state.
+        # Deconvolute state indices.
+        state_indices = [None for _ in frame_indices]
+        for i, iteration in enumerate(frame_indices):
+            replica_indices = reporter._storage_analysis.variables['states'][iteration, :]
+            state_indices[i] = np.where(replica_indices == state_index)[0]
+        n_trajectory_frames = sum(len(x) for x in state_indices)        
+        
+    # Initialize positions and box vectors arrays.
+    # MDTraj Cython code expects float32 positions.
+    positions = np.zeros((n_trajectory_frames, n_atoms, 3), dtype=np.float32)
+
+    # Extract state positions and box vectors.
+    if state_index is not None:
+        # Extract state positions
+        frame_idx = 0
+        for i, iteration in enumerate(frame_indices):
+            for replica_index in state_indices[i]:
+                positions[frame_idx, :, :] = trajectory_storage.variables['positions'][iteration, replica_index, :, :].astype(np.float32)
+                frame_idx += 1
+
+    else:  # Extract replica positions
+        for i, iteration in enumerate(frame_indices):
+            positions[i, :, :] = trajectory_storage.variables['positions'][iteration, replica_index, :, :].astype(np.float32)
+
+    return positions
 
 class ReplicaExchange:
     def __init__(self,
@@ -38,6 +96,7 @@ class ReplicaExchange:
         friction=1.0 / unit.picosecond,
         minimize=True,
         exchange_frequency=1000,
+        overwrite = False,
         ):
 
         """
@@ -73,6 +132,8 @@ class ReplicaExchange:
         self.friction = friction
         self.minimize = minimize
         self.exchange_frequency = exchange_frequency
+        self.overwrite = overwrite
+
         
         if temperatures is None:
             self.temperatures = [((300.0 + i) * unit.kelvin) for i in range(0, 1200, 100)]
@@ -91,6 +152,7 @@ class ReplicaExchange:
 
         temperatures = [s.temperature for s in states]
         beta_k = np.array([ 1 / (kB * temp._value) for temp in temperatures])
+        beta_k = np.array([i / i.unit for i in beta_k])
         replica_energies *= (beta_k ** (-1))[None, :, None]
 
         # print(replica_energies.shape)
@@ -119,9 +181,9 @@ class ReplicaExchange:
         return int(np.floor(self.n_steps / self.exchange_frequency))
     
     def _init_reporter_(self):
-        if os.path.exists(self.out_filepath):
-            os.remove(self.out_filepath)
-
+        if self.overwrite:
+            if os.path.exists(self.out_filepath):
+                os.remove(self.out_filepath)
         os.makedirs(os.path.dirname(self.out_filepath), exist_ok=True)
         self.reporter = MultiStateReporter(self.out_filepath, checkpoint_interval=1)
 
@@ -228,7 +290,9 @@ class ReplicaExchange:
                 
         beta_k = np.array([ 1 / (kB * temp._value) for temp in temperatures])
         n_replicas = len(temperatures)
+        beta_k = np.array([i / i.unit for i in beta_k])
         replica_energies *= (beta_k ** (-1))[None, :, None]
+        print(beta_k)
 
         total_steps = len(replica_energies[0][0])
         state_energies = np.zeros([n_replicas, total_steps])
@@ -261,7 +325,7 @@ class ReplicaExchange:
         else:
             # For small trajectories, use detectEquilibration
             for state in range(n_replicas):
-                t0[state], g[state], _ = timeseries.detectEquilibration(state_energies[state], nskip=equil_nskip)  
+                t0[state], g[state], _ = timeseries.detect_equilibration(state_energies[state], nskip=equil_nskip)  
                 # Choose the latest equil timestep to apply to all states    
                 production_start = int(np.max(t0))
         
@@ -321,7 +385,7 @@ class ReplicaExchange:
         t14 = time.perf_counter()
         
         if plot_production_only==True:
-            plot_energies(
+            self.plot_energies(
                 state_energies[:,production_start:],
                 temperatures,
                 series_per_page,
@@ -330,13 +394,13 @@ class ReplicaExchange:
                 file_name=f"{output_directory}/rep_ex_ener.pdf",
             )
             
-            plot_energy_histograms(
+            self.plot_energy_histograms(
                 state_energies[:,production_start:],
                 temperatures,
                 file_name=f"{output_directory}/rep_ex_ener_hist.pdf",
             )
 
-            plot_summary(
+            self.plot_summary(
                 replica_state_indices[:,production_start:],
                 temperatures,
                 series_per_page,
@@ -345,35 +409,32 @@ class ReplicaExchange:
                 file_name=f"{output_directory}/rep_ex_states.pdf",
             )
             
-            plot_matrix(
+            self.plot_matrix(
                 replica_state_indices[:,production_start:],
                 file_name=f"{output_directory}/state_probability_matrix.pdf",
             )
             
         else:
-            plot_energies(
+            self.plot_energies(
                 state_energies,
                 temperatures,
                 series_per_page,
                 time_interval=time_interval,
                 file_name=f"{output_directory}/rep_ex_ener.pdf",
             )
-            
-            plot_energy_histograms(
+            self.plot_energy_histograms(
                 state_energies,
                 temperatures,
                 file_name=f"{output_directory}/rep_ex_ener_hist.pdf",
             )
-
-            plot_summary(
+            self.plot_summary(
                 replica_state_indices,
                 temperatures,
                 series_per_page,
                 time_interval=time_interval,
                 file_name=f"{output_directory}/rep_ex_states.pdf",
             )
-            
-            plot_matrix(
+            self.plot_matrix(
                 replica_state_indices,
                 file_name=f"{output_directory}/state_probability_matrix.pdf",
             )
@@ -424,6 +485,87 @@ class ReplicaExchange:
         reporter.close()
 
         return (replica_energies, replica_state_indices, production_start, sample_spacing, n_transit, mixing_stats)
+
+    def make_replica_dcd_files(self,
+        topology, timestep=5*unit.femtosecond, time_interval=200,
+        output_dir="output", output_data="output.nc", checkpoint_data="output_checkpoint.nc",
+        frame_begin=0, frame_stride=1, center=False):
+        """
+        Make dcd files from replica exchange simulation trajectory data.
+
+        :param topology: OpenMM Topology
+        :type topology: `Topology() <https://simtk.org/api_docs/openmm/api4_1/python/classsimtk_1_1openmm_1_1app_1_1topology_1_1Topology.html>`_
+
+        :param timestep: Time step used in the simulation (default=5*unit.femtosecond)
+        :type timestep: `Quantity() <http://docs.openmm.org/development/api-python/generated/simtk.unit.quantity.Quantity.html>` float * simtk.unit
+
+        :param time_interval: frequency, in number of time steps, at which positions were recorded (default=200)
+        :type time_interval: int
+
+        :param output_dir: path to which we will write the output (default='output')
+        :type output_dir: str
+
+        :param output_data: name of output .nc data file (default='output.nc')
+        :type output_data: str    
+
+        :param checkpoint_data: name of checkpoint .nc data file (default='output_checkpoint.nc')
+        :type checkpoint_data: str   
+
+        :param frame_begin: Frame at which to start writing the dcd trajectory (default=0)
+        :type frame_begin: int
+
+        :param frame_stride: advance by this many time intervals when writing dcd trajectories (default=1)
+        :type frame_stride: int
+
+        :param center: align all frames in the replica trajectories (default=False)
+        :type center: Boolean
+        """
+
+        file_list = []
+
+        output_data_path = os.path.join(output_dir, output_data)
+
+        # Get number of replicas:
+        reporter = MultiStateReporter(output_data_path, open_mode='r', checkpoint_storage=checkpoint_data)
+        states = reporter.read_thermodynamic_states()[0]
+        n_replicas=len(states)
+
+        sampler_states = reporter.read_sampler_states(iteration=0)
+        xunit = sampler_states[0].positions[0].unit
+
+        for replica_index in range(n_replicas):
+            replica_positions = extract_trajectory(topology, reporter, replica_index=replica_index,
+                frame_begin=frame_begin, frame_stride=frame_stride)
+
+            n_frames_tot = replica_positions.shape[0]
+
+            # Determine simulation time (in ps) for each frame:
+            time_delta_ps = (timestep*time_interval).value_in_unit(unit.picosecond)
+            traj_times = np.linspace(
+                frame_begin*time_delta_ps,
+                (frame_begin+frame_stride*(n_frames_tot-1))*time_delta_ps,
+                num=n_frames_tot,
+            )
+
+            file_name = f"{output_dir}/replica_{replica_index+1}.dcd"
+
+            # Trajectories are written in nanometers:
+            replica_traj = Trajectory(
+                replica_positions,
+                Topology.from_openmm(self.topology),
+                time=traj_times,
+            )
+
+            if center:
+                ref_traj = replica_traj[0]
+                replica_traj.superpose(ref_traj)
+                # This rewrites to replica_traj        
+
+            Trajectory.save_dcd(replica_traj,file_name)
+
+        reporter.close()
+
+        return file_list
         
     def restart(self):
 
@@ -583,6 +725,7 @@ class ReplicaExchange:
         
 
     def plot_energy_histograms(
+        self, 
         state_energies,
         temperatures,
         file_name="rep_ex_ener_hist.pdf",
@@ -638,6 +781,7 @@ class ReplicaExchange:
         
         
     def plot_matrix(
+        self,
         replica_state_indices,
         file_name='state_probability_matrix.pdf'
         ):
@@ -696,7 +840,7 @@ class ReplicaExchange:
         return hist_all
         
         
-    def plot_summary(
+    def plot_summary(self,
         replica_states,
         temperatures,
         series_per_page,
@@ -786,16 +930,20 @@ class ReplicaExchange:
                     page_num += 1
 
         return
-    
 
 if __name__ == "__main__":
     import datamol as dm
     from openff.toolkit.typing.engines.smirnoff import ForceField
     from openff.toolkit.topology import Molecule, Topology
     from opendata.conformers.conformers import mol_to_openmm_topology_and_system
-    from opendata import utils
+    import openmm 
+    #from opendata import utils
 
-    smi = "CC(=O)NC1=CC=C(C=C1)O"
+    # setup the platform 
+    from openmmtools.cache import global_context_cache
+    global_context_cache.platform = openmm.Platform.getPlatformByName("CPU")
+
+    smi = "CC(C(=O)NC(C)C(=O)O)N"
     ff_engine = ForceField("openff_unconstrained-2.0.0.offxml")
 
     # Parameterize the system
@@ -808,29 +956,19 @@ if __name__ == "__main__":
 
     positions = mol.conformers[0].to_openmm()
 
-    cache = utils.get_local_cache()
-    opath = os.path.join(cache, "replicate_test")
+    #cache = utils.get_local_cache()
+    opath = "output"
+    if not os.path.exists(opath):
+        os.mkdir(opath)
+
+    output_data = os.path.join(opath, "output.nc")
     print(positions)
 
-    re = ReplicaExchange(topology=topology, system=system, positions=positions, out_filepath=opath)
+    re = ReplicaExchange(topology=topology, system=system, positions=positions, overwrite=False,
+                        out_filepath=output_data, temperatures = [300.0  * unit.kelvin, 500.0  * unit.kelvin])
     re()
-    print(re.n_replica)
-    print(re.n_steps)
-    print(re.exchange_attempts)
-    d = re.reporter_to_dict()
-    for x, k in d.items():
-        print(x, k)
-    print()
-    exit()
+    re.process_replica_exchange_data()
 
-    fn = lambda xt: md_simulate_conformers(xt[0].to_openmm(), temperature=xt[1] * unit.kelvin, 
-                                            topology=topology, system=system)
-    all_conformers = dm.utils.parallelized(
-        fn,
-        [(x, t) for x in mol.conformers.get for t in temperatures ],
-        progress=True,
-    )
-    all_conformers = flatten(all_conformers)
 
 
 
