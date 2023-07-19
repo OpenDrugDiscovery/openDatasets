@@ -20,6 +20,8 @@ import mdtraj as md
 from openmm.app import PDBFile
 from pydantic import BaseModel, Extra, Field
 
+import mdtraj as md 
+
 
 class PocketExtractor(BaseModel):
     """
@@ -38,18 +40,23 @@ class PocketExtractor(BaseModel):
     remove_water: bool = Field(True, description="whether to remove water molecules or not.")
     add_hs: bool = Field(True, description="whether to add hydrogens or not.")
 
-    def __call__(self, modeller: Modeller, filepath="modfied_pdb.pdb", save_pdb: bool = False):
+    def __call__(self, modeller: Modeller, filepath="modfied_pdb.pdb", save_pdb: bool = False, as_df=True):
         modified_modeller = extract_pocket(modeller, self.distance_cutoff, self.remove_water, self.add_hs)
         if save_pdb:
             with fsspec.open(filepath, "w") as f:
                 app.PDBFile.writeFile(
                     modified_modeller.topology, modified_modeller.positions, f, keepIds=True
                 )
-        return {"positions": modified_modeller.positions, "topology": modified_modeller.topology}
+        pos =  to_array(modified_modeller.positions)
+        if as_df:
+            df,_ = md.Topology.from_openmm(modified_modeller.topology).to_dataframe()
+            df["positions"]=pos.tolist()
+            return df
+        return {"positions": pos, "topology": md.Topology.from_openmm(modified_modeller.topology).to_dataframe()[0]}
 
-    def from_pdb(self, pdb_path: str, filepath="modfied_pdb.pdb", save_pdb: bool = False):
+    def from_pdb(self, pdb_path: str, filepath="modfied_pdb.pdb", save_pdb: bool = False, as_df=False):
         modeller = get_modeller(pdb_path)
-        return self(modeller, filepath, save_pdb)
+        return self(modeller, filepath, save_pdb, as_df)
 
 
 def get_receptor_residue_names(
