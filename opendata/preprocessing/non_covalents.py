@@ -51,6 +51,26 @@ def get_misato_maps():
         with fsspec.open(os.path.join(misato_dir, "maps", v), "rb") as fd:
             maps[k] = pkl.load(fd)
     maps['symbol'] = {i: chem_table.GetElementSymbol(i) for i in range(118)}
+
+    elements = list(maps['name'].items())
+    idxs = np.array([k[1] for k in maps['name']])
+    names = np.array([k[0] for k in maps['name']])
+    for aa in np.unique(names):
+        ixs = np.argwhere(names == aa).flatten()
+        sub = [elements[i] for i in ixs]
+        ixs = list(np.argwhere(idxs[ixs] == 0).flatten()) + [len(sub)]
+        subs = [sub[i:j] for i, j in zip(ixs[:-1], ixs[1:])]
+        for sub in subs:
+            vs = {x[-1]:[] for x in sub}
+            for x in sub:
+                vs[x[-1]].append(x[0])
+
+            # for v, k in vs.items():
+            #     if len(k) > 1:
+            #         print(v, k)
+
+    # make some adjustments:
+    maps['name'][('PRO', 8, 'HC')] = "HB1"
     return maps
 
 
@@ -81,11 +101,15 @@ class MisatoMDFrame:
         idxs = sorted(list(np.argwhere(predicat).flatten()) + list(end_idxs[end_idxs >= 0]))
 
         i = 0
-        for k, j in enumerate(idxs + [-1]):
+        for k, j in enumerate(idxs):
             res["res_number"][i:j+1] = k+1
-            if j == -1: j = x.shape[0]-1
             res["res_atom_index"][i:j+1] = range(j-i+1)
             i = j+1
+        if i != x.shape[0]:
+            j = x.shape[0]-1
+            res["res_number"][i:j+1] = k+1
+            res["res_atom_index"][i:j+1] = range(j-i+1)
+
 
         tmp = pd.DataFrame(res).reset_index()
         res["atom_name"] = tmp.apply(self.get_atom_name, axis=1)
@@ -122,7 +146,7 @@ class MisatoMDFrame:
         entries = pd.DataFrame(data).reset_index().to_dict('records')
         lines = []
         for i, entry in enumerate(entries):
-            line = 'ATOM{index:7d}  {atom_name:<4}{res_name:<4}{res_number:>5}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           {atoms_number:<5}'.format(**entry)
+            line = 'ATOM{index:7d} {atom_name:<4} {res_name:<4}{res_number:>5}    {x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           {atoms_number:<5}'.format(**entry)
             lines.append(line)
             if i + 1 in molecules_begin_atom_index:
                 lines.append("TER")
@@ -132,6 +156,7 @@ class MisatoMDFrame:
             fd.write('\n'.join(lines))
         
         return fname
+
 
 class MisatoMD:
 
@@ -151,13 +176,13 @@ def get_misato():
     md_data = h5py.File(fd)
     complex_codes = list(md_data.keys())
     # np.random.shuffle(complex_codes)
-    for code in complex_codes:
+    for code in complex_codes[:10]:
+        print(code)
         m = MisatoMDFrame(code, md_data, 0)
         fname = m.write_pdb(m_cache_dir)
         # Open the input PDB file
-        p_extractor = PocketExtractor(distance_cutoff=9)
-        p_extractor.from_pdb(pdb_path=fname, filepath=fname.replace(code, f'{code}_pocket'))
-        exit()
+        p_extractor = PocketExtractor(distance_cutoff=4.5)
+        p_extractor.from_pdb(pdb_path=fname, filepath=fname.replace(code, f'{code}_pocket'), save_pdb=True)
 
 
 def create_pdbbind_set(cache_folder):

@@ -89,7 +89,6 @@ def delete_residues(
         copy_modeller: whether to copy the modeller or not. It has implication
             when testing the equality between two residue objects.
     """
-    print("deleted")
 
     def delete_fn(residue):
         # Collect all the atoms indices
@@ -102,7 +101,6 @@ def delete_residues(
         modeller = copy.deepcopy(modeller)
     to_delete = filter(lambda res: delete_fn(res), modeller.topology.residues())
     modeller.delete(to_delete)
-    print("deleted")
     return modeller
 
 
@@ -127,7 +125,8 @@ def extract_pocket(modeller: Modeller, distance_cutoff=5.0, remove_water=True):
     # Get the positions of the ligand
     traj = trajectory(modeller)
     ligand_idx = get_indexs_mol(traj)
-    if ligand_idx is None:
+    if len(ligand_idx) == 0:
+        logger.warning("No ligand found")
         return None
     ligand_pos = traj.xyz[0][ligand_idx] * 10  # type: ignore
 
@@ -141,12 +140,10 @@ def extract_pocket(modeller: Modeller, distance_cutoff=5.0, remove_water=True):
     # Compute the pairwise distances between the ligand's atoms and the target's atoms
 
     d = spatial.distance.cdist(target_pos, ligand_pos).min(axis=1)
-    print("toto")
 
     # Flag as True any target's atoms inside the cutoff
-    target_atoms_inside = d <= distance_cutoff
+    target_atoms_inside = (d <= distance_cutoff)
 
-    print("toto")
     # Delete the residues
     modeller = delete_residues(modeller, target_atoms_inside)
     modeller.addHydrogens()
@@ -162,13 +159,18 @@ def trajectory(m: Modeller) -> md.Trajectory:
 
 
 def get_indexs_mol(trajectory: md.Trajectory, resname: str = "MOL") -> list[int]:
-    idx = trajectory.top.select(f"resname {resname}")  # type: ignore
-    if idx.size == 0:
-        idx = trajectory.top.select(f"resname '{resname}'")  # type: ignore
-        if idx.size == 0:
-            logger.error("Selection not found for resname: {resname}")
-            raise ValueError
-        res = idx.tolist()
-    else:
-        res = None
-    return res
+    df, _ = trajectory.top.to_dataframe()
+    return df.index[df["resName"] == "MOL"].tolist()
+    # print(df.index[df["resName"] == "MOL"].tolist())
+    # print(df.head())
+    # print(df.tail())
+    # idx = trajectory.top.select(f"resname {resname}")  # type: ignore
+    # if idx.size == 0:
+    #     idx = trajectory.top.select(f"resname '{resname}'")  # type: ignore
+    #     if idx.size == 0:
+    #         logger.error("Selection not found for resname: {resname}")
+    #         raise ValueError
+    #     res = idx.tolist()
+    # else:
+    #     res = None
+    # return res

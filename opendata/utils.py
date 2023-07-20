@@ -146,8 +146,4 @@ def rmsd_filtering(mol, threshold=0.1):
     if is_opemm_mol:
         mol = Molecule.from_rdkit(mol, allow_undefined_stereo=False)
 
-<<<<<<< HEAD
     return mol
-=======
-    return mol
->>>>>>> origin/dev

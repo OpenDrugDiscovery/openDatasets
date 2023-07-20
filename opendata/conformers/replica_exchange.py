@@ -956,8 +956,8 @@ if __name__ == "__main__":
 
     positions = mol.conformers[0].to_openmm()
 
-    #cache = utils.get_local_cache()
-    opath = "output"
+    cache = utils.get_local_cache()
+    opath = os.path.join(cache, "output")
     if not os.path.exists(opath):
         os.mkdir(opath)
 
