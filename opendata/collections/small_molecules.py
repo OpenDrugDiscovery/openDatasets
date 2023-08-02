@@ -17,7 +17,7 @@ from qcportal.singlepoint.record_models import QCSpecification
 from qcportal.singlepoint.record_models import SinglepointDriver
 from datamol.descriptors import compute_many_descriptors, n_stereo_centers_unspecified
 from opendata.preprocessing.small_molecules import load_fragment_collection
-from opendata.conformers.conformers import generate_conformers_from_smiles
+from opendata.conformers.simple_md import generate_conformers_from_smiles
 from opendata.collections.specs import get_specs
 
 

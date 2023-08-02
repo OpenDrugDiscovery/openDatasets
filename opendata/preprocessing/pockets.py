@@ -1,6 +1,7 @@
 import copy
 import fsspec
 import pdbfixer
+import warnings
 import numpy as np
 import datamol as dm
 from loguru import logger
@@ -15,38 +16,6 @@ from openmm.app import Modeller
 import mdtraj as md
 from openmm.app import PDBFile
 from pydantic import BaseModel, Extra, Field
-
-
-class PocketExtractor(BaseModel):
-    """
-    Args:
-        distance_cutoff: the distance cutoff to use to extract the pocket in Angstrom.
-        remove_water: whether to remove water molecules or not.
-        add_hs: whether to add hydrogens or not.
-    """
-
-    class Config:
-        extra = Extra.forbid
-
-    distance_cutoff: float = Field(
-        5.0, description="the distance cutoff to use to extract the pocket in Angstrom."
-    )
-    remove_water: bool = Field(True, description="whether to remove water molecules or not.")
-
-    def __call__(self, modeller: Modeller, filepath="modfied_pdb.pdb", save_pdb: bool = False):
-        modified_modeller = extract_pocket(modeller, self.distance_cutoff, self.remove_water)
-        if modified_modeller is None:
-            return None
-        if save_pdb:
-            with fsspec.open(filepath, "w") as f:
-                app.PDBFile.writeFile(
-                    modified_modeller.topology, modified_modeller.positions, f, keepIds=True
-                )
-        return {"positions": modified_modeller.positions, "topology": modified_modeller.topology}
-
-    def from_pdb(self, pdb_path: str, filepath="modfied_pdb.pdb", save_pdb: bool = False):
-        modeller = get_modeller(pdb_path)
-        return self(modeller, filepath, save_pdb)
 
 
 def get_receptor_residue_names(
@@ -105,11 +74,13 @@ def delete_residues(
 
 
 def load_pdb(pdb_path: str):
-    with fsspec.open(pdb_path, "r") as f:
-        try:
-            input_pdb = PDBFile(f)
-        except:
-            input_pdb = PDBxFile(f)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with fsspec.open(pdb_path, "r") as f:
+            try:
+                input_pdb = PDBFile(f)
+            except:
+                input_pdb = PDBxFile(f)
     return input_pdb
 
 
@@ -118,7 +89,26 @@ def get_modeller(pdb_path: str):
     return Modeller(pdb.topology, pdb.positions)
 
 
-def extract_pocket(modeller: Modeller, distance_cutoff=5.0, remove_water=True):
+def to_array(quant: unit.Quantity) -> np.ndarray:
+    return np.array(quant / quant.unit)
+
+
+def trajectory(m: Modeller) -> md.Trajectory:
+    return md.Trajectory(to_array(m.positions), md.Topology.from_openmm(m.topology))
+
+
+def get_indexs_mol(trajectory: md.Trajectory, resname: str = "MOL") -> list[int]:
+    df, _ = trajectory.top.to_dataframe()
+    return df.index[df["resName"] == "MOL"].tolist()
+
+
+def extract_pocket_from_model(modeller: Modeller, outpath=None, distance_cutoff=5.0, 
+                              remove_water=True, as_df=True):
+    """
+    Args:
+        distance_cutoff: the distance cutoff to use to extract the pocket in Angstrom.
+        remove_water: whether to remove water molecules or not.
+    """
     if remove_water:
         modeller.deleteWater()
 
@@ -134,7 +124,6 @@ def extract_pocket(modeller: Modeller, distance_cutoff=5.0, remove_water=True):
     target_pos = modeller.getPositions()
     target_pos = target_pos.in_units_of(unit.angstroms)
     target_pos = np.array([[v.x, v.y, v.z] for v in target_pos])
-    print("toto", ligand_pos.shape, target_pos.shape)
 
     # NOTE(Cristian): this is fine for a single frame but for a trajectory will probably be better to use something with  md.compute_neighbors
     # Compute the pairwise distances between the ligand's atoms and the target's atoms
@@ -146,31 +135,31 @@ def extract_pocket(modeller: Modeller, distance_cutoff=5.0, remove_water=True):
 
     # Delete the residues
     modeller = delete_residues(modeller, target_atoms_inside)
-    modeller.addHydrogens()
-    return modeller
+
+    if modeller is None:
+        return None
+    else:
+        modeller.addHydrogens()
+
+    if outpath is not None:
+        with fsspec.open(outpath, "w") as f:
+            app.PDBFile.writeFile(
+                modeller.topology, modeller.positions, f, keepIds=True
+            )
+
+    pos =  to_array(modeller.positions)
+    if as_df:
+        res,_ = md.Topology.from_openmm(modeller.topology).to_dataframe()
+        res["positions"]=pos.tolist()
+    else:
+        res = dict(model=modeller, 
+                    positions=pos, 
+                    topology=md.Topology.from_openmm(modeller.topology).to_dataframe()[0])
+    # logger.info(f"Nb ligand atoms: {ligand_pos.shape[0]}, Nb protein atoms: {target_pos.shape[0]},"
+    #             f"Nb Pocket atoms: {pos.shape[0]-ligand_pos.shape[0]}")
+    return res
 
 
-def to_array(quant: unit.Quantity) -> np.ndarray:
-    return np.array(quant / quant.unit)
-
-
-def trajectory(m: Modeller) -> md.Trajectory:
-    return md.Trajectory(to_array(m.positions), md.Topology.from_openmm(m.topology))
-
-
-def get_indexs_mol(trajectory: md.Trajectory, resname: str = "MOL") -> list[int]:
-    df, _ = trajectory.top.to_dataframe()
-    return df.index[df["resName"] == "MOL"].tolist()
-    # print(df.index[df["resName"] == "MOL"].tolist())
-    # print(df.head())
-    # print(df.tail())
-    # idx = trajectory.top.select(f"resname {resname}")  # type: ignore
-    # if idx.size == 0:
-    #     idx = trajectory.top.select(f"resname '{resname}'")  # type: ignore
-    #     if idx.size == 0:
-    #         logger.error("Selection not found for resname: {resname}")
-    #         raise ValueError
-    #     res = idx.tolist()
-    # else:
-    #     res = None
-    # return res
+def extract_pocket_from_pdb(pdb_path: str,  outpath, **kwargs):
+    modeller = get_modeller(pdb_path)
+    return extract_pocket_from_model(modeller, outpath, **kwargs)

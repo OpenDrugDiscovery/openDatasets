@@ -19,7 +19,8 @@ from rdkit import Chem
 from collections import Counter
 from opendata import utils 
 from openmm.app import PDBxFile, PDBFile
-from opendata.preprocessing.pockets import PocketExtractor
+from itertools import product
+from opendata.preprocessing.pockets import extract_pocket_from_pdb
 
 
 file_urls = [
@@ -175,15 +176,28 @@ def get_misato():
         fd = fd.open()
     md_data = h5py.File(fd)
     complex_codes = list(md_data.keys())
-    # np.random.shuffle(complex_codes)
-    for code in complex_codes[:10]:
-        print(code)
-        m = MisatoMDFrame(code, md_data, 0)
-        fname = m.write_pdb(m_cache_dir)
-        # Open the input PDB file
-        p_extractor = PocketExtractor(distance_cutoff=4.5)
-        p_extractor.from_pdb(pdb_path=fname, filepath=fname.replace(code, f'{code}_pocket'), save_pdb=True)
+    fd.close()
 
+    def fn(code_index, fname=fname, m_cache_dir=m_cache_dir):
+        code, index = code_index
+        m_cache_dir = os.path.join(m_cache_dir,  code)
+        
+        fd = fsspec.open(fname, mode="rb")
+        if hasattr(fd, "open"):
+            fd = fd.open()
+        md_data = h5py.File(fd)
+        try:
+            m = MisatoMDFrame(code, md_data, index)
+            fname = m.write_pdb(m_cache_dir)
+            # Open the input PDB file
+            pocket = extract_pocket_from_pdb(pdb_path=fname, 
+                                             outpath=fname.replace(code, f'{code}_pocket'))
+        except:
+            logger.warning(f"Failed to extract the pocket from {code}")
+        
+    it = product(complex_codes, np.arange(100))
+    dm.parallelized(fn, it, n_jobs=-1, verbose=1)
+        
 
 def create_pdbbind_set(cache_folder):
     """Create a set of PDBbind ligands."""
