@@ -1,5 +1,8 @@
+import copy
+import json
 import mdtraj
 import openmm
+import hashlib
 import numpy as np
 import datamol as dm
 
@@ -19,6 +22,13 @@ from openff.toolkit.topology import Molecule, Topology
 from opendata.conformers.simple_md import parallel_tempering_md
 from opendata.conformers.replica_exchange import run_replica_exchange
 from opendata.conformers.utils import filter_by_rmsd, get_topology_system
+
+
+def dict_to_hash(dict_obj: dict) -> str:
+    d = copy.deepcopy(dict_obj)
+
+    uid = str(hashlib.sha1(json.dumps(d, sort_keys=True).encode()).hexdigest())[:8]
+    return uid
 
 
 class ConformerGenerator():
@@ -94,7 +104,7 @@ class ConformerGenerator():
             res = None
         return res
 
-    def from_openmm(self, mol, topology, system):
+    def from_openmm(self, mol, topology, system, outpath_prefix=None):
         """
         Generate conformers from an OpenMM topology and system.
 
@@ -119,29 +129,37 @@ class ConformerGenerator():
         else:
             n_conformers = self.n_conformers
 
+        mol._conformers = None
+        if outpath_prefix is None:
+            outpath_prefix = dict_to_hash(mol.to_dict())
+
         # Generating {n_starting_points} starting points
         mol.generate_conformers(n_conformers=2, rms_cutoff=None)
         starting_points = mol.conformers[0].to_openmm()
 
         # Select a subset that is maximally different from one another
         if self.use_replica_exchange:
-            all_conformers, _ = run_replica_exchange(starting_positions=starting_points,
+            all_conformers, _ = run_replica_exchange(
+                                        starting_positions=starting_points,
                                         topology=topology,
                                         system=system,
-                                        temperatures=self.temperatures,)
+                                        temperatures=self.temperatures,
+                                        outpath_prefix=outpath_prefix,)
         else:
-            all_conformers, _ = parallel_tempering_md(starting_positions=starting_points,
+            all_conformers, _ = parallel_tempering_md(
+                                        starting_positions=starting_points,
                                         topology=topology,
                                         system=system,
-                                        temperatures=self.temperatures,)
+                                        temperatures=self.temperatures,
+                                        outpath_prefix=outpath_prefix,)
 
         # Select a subset that is maximally different from one another
         all_conformers = filter_by_rmsd(all_conformers, topology, 
-                                        n_conformers=self.n_conformers, center_positions=True)
+                                        n_conformers=n_conformers, center_positions=True)
 
         # Set all the generated conformers for the mol
         mol._conformers = None
         for c in all_conformers:
-            mol.add_conformer(c)
+            mol.add_conformer(c * unit.nanometers)
 
         return mol

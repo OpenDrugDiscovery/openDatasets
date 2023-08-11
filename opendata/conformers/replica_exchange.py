@@ -14,6 +14,7 @@ from openmmtools.multistate import (MultiStateReporter,
 from openmmtools.states import SamplerState, ThermodynamicState
 from openmmtools.mcmc import LangevinDynamicsMove
 from opendata.conformers.utils import filter_by_rmsd
+from opendata.utils import get_local_cache
 
 
 # silent citation spam
@@ -26,7 +27,7 @@ def run_replica_exchange(
     topology,
     system,
     starting_positions,
-    out_dir,
+    outpath_prefix,
     n_steps: int = 1e4,
     step_size: Quantity = 0.001 * unit.picosecond,
     save_every: int = 10,
@@ -71,7 +72,10 @@ def run_replica_exchange(
     exchange_attempts = int(np.floor(n_steps / exchange_frequency))
     if temperatures is None:
         temperatures = [((300.0 + i) * unit.kelvin) for i in range(0, 1200, 100)]
+    else:
+        temperatures = [(t * unit.kelvin) if not is_quantity(t) else t for t in temperatures]
 
+    out_dir = os.path.join(get_local_cache(), "md/replica_exchange", outpath_prefix)
     if os.path.exists(out_dir):
         shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir, exist_ok=True)

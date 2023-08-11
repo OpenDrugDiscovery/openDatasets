@@ -1,16 +1,21 @@
+import os
+import shutil
 import openmm
+import fsspec
 import numpy as np
 import datamol as dm
-
+import pickle as pkl
 import openmm.unit as unit
 from openmm import app, State
 from openmm.unit import Quantity
+from opendata.utils import get_local_cache
 
 
 def parallel_tempering_md(
         starting_positions,
         topology: app.Topology,
         system: openmm.System,
+        outpath_prefix: str,
         temperatures: list=[300, 500, 1000, 1500],
         n_steps: int = 1e4,
         step_size: Quantity = 2 * unit.femtosecond,
@@ -68,10 +73,20 @@ def parallel_tempering_md(
         progress=True,
         n_jobs=n_jobs,
     )
-    positions = np.concatenate([x[0] for x in res])
-    energies = np.concatenate([x[1] for x in res])
 
-    return positions, energies
+    positions = [x[0] for x in res]
+    energies = [x[1] for x in res]
+    res = dict(temperatures=temperatures, positions=positions, energies=energies)
+
+    out_dir = os.path.join(get_local_cache(), "md/parallel_tempering", outpath_prefix)
+    if os.path.exists(out_dir):
+        shutil.rmtree(out_dir, ignore_errors=True)
+    os.makedirs(out_dir, exist_ok=True)
+
+    with fsspec.open(os.path.join(out_dir, "output.pkl"), "wb") as fd:
+        pkl.dump(res, fd)
+
+    return np.concatenate(positions), np.concatenate(energies)
 
 
 def run_single_md(

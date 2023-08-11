@@ -16,7 +16,7 @@ import fsspec.implementations.ftp
 from rdkit.Chem.Descriptors import MolWt
 from rdkit import RDLogger
 from opendata.utils import merge_counters, get_local_cache, get_remote_cache, caching_wrapper
-
+from opendata.preprocessing.utils import mols_fragmentation, mols_iso_tautomerization
 RDLogger.DisableLog('rdApp.*')
 
 
@@ -164,50 +164,21 @@ def load_datasets(flatten=False, verbose=0, n_jobs=-1):
                            remote_filesystem=remote_fs)
 
 
-def _fragmentation_(list_smiles: List[str],
-                    max_mol_weight: float=1000.0,
-                    max_frag_weight: float=300.0) -> List[str]:
-    res = Counter()
-    for smi in list_smiles:
-        try:
-            mol = dm.to_mol(smi)
-            mol = dm.standardize_mol(dm.remove_stereochemistry(mol))
-            if mol is None:
-                continue
-            w = MolWt(mol)
-            
-            with dm.without_rdkit_log():
-                frags = dm.fragment.brics(mol, remove_parent=True)
-                frags = [dm.to_smiles(x) for x in frags if MolWt(x) < max_frag_weight]
-
-            if w < max_mol_weight:
-                frags.append(dm.to_smiles(mol))
-
-            res.update(Counter(frags))
-        except:
-            pass
-    return res
-
-
-def expansion_by_fragment_decomposition(smiles_list,
-                    max_mol_weight: float=1000.0,
-                    max_frag_weight: float=300.0):
-    f = lambda x: [_fragmentation_(x, max_mol_weight, max_frag_weight)]
+def expansion_by_fragment_decomposition(smiles_list, max_frag_weight: float=300.0):
+    f = lambda x: [mols_fragmentation(x, max_frag_weight)]
     res = dm.parallelized_with_batches(f, smiles_list, batch_size=256, n_jobs=-1, progress=True)
-    res = merge_counters(res, step=5, verbose=0)
-    logger.info(f"Nb fragments: {len(res)}")
-    return res
+    frags = merge_counters(res, step=5, verbose=0)
+    logger.info(f"Nb fragments: {len(frags)}")
+    return frags
 
 
 @cli.command()
-@click.option("--chunk-id", type=int,  help="chunk id starting at 0")
-@click.option("--chunk-size", type=int, default=1000000, help="Chunk size to divide and conquer.")
-@click.option("--max-mol-weight", type=float, default=1000.0, help="Maximum molecular weight (default: 1000.0 dA).")
-@click.option("--max-frag-weight", type=float, default=300.0, help="Maximum fragment weight (default: 300.0 dA).")
+@click.option("--chunk-id", "-i", type=int,  help="chunk id starting at 0")
+@click.option("--chunk-size", "-s", type=int, default=1000000, help="Chunk size to divide and conquer.")
+@click.option("--max-frag-weight", "-w", type=float, default=300.0, help="Maximum fragment weight (default: 300.0 dA).")
 def fragmentation(
         chunk_id,
         chunk_size,
-        max_mol_weight: float=500.0, 
         max_frag_weight: float=250.0) -> None:
     """
     Load unichem molecules and expand them by fragment decomposition and
@@ -216,10 +187,7 @@ def fragmentation(
     Args:
         in_fname (str): Path to input file.
         out_fname (str): Path to output file.
-        max_mol_weight (float): Maximum molecular weight.
         max_frag_weight (float): Maximum fragment weight.
-        max_isomers (int): Maximum number of isomers to enumerate.
-        max_tautomers (int): Maximum number of tautomers to enumerate.
     """
 
     all_smiles = load_datasets(flatten=True, verbose=1, n_jobs=-1)
@@ -238,7 +206,6 @@ def fragmentation(
         logger.info(f"Expanding molecules from {start_idx}_{end_idx}...")
         caching_wrapper(expansion_by_fragment_decomposition,
                         all_smiles,
-                        max_mol_weight=max_mol_weight,
                         max_frag_weight = max_frag_weight,
                         local_path=local_file,
                         remote_path=remote_file,
@@ -251,6 +218,7 @@ def _load_fragment_collection_(include_iso_tauto=False):
     remote_files = remote_fs.glob(os.path.join(remote_dir, "unichem", fname))
     fnames = local_files if len(local_files) else remote_files
     all_res = []
+
     if len(fnames):
         for fname in fnames:
             with fsspec.open(fname, "rb") as fd:
@@ -266,58 +234,31 @@ def load_fragment_collection(include_iso_tauto=False):
     res = caching_wrapper(_load_fragment_collection_,
                     local_path=local_file,
                     remote_path=remote_file,
-                    remote_filesystem=remote_fs
+                    remote_filesystem=remote_fs,
+                    include_iso_tauto=include_iso_tauto
     )
     logger.info(f"Fragment collection size: {len(res)}")
 
     return res
 
 
-def _iso_tautomerization_(list_smiles: List[str], 
-                        max_isomers: int=10, 
-                        max_tautomers: int=10,
-                        iso: bool=True):
-    res = Counter()
-    for smi in list_smiles:
-        try:
-            mol = dm.to_mol(smi)
-            if mol is None:
-                continue
-
-            with dm.without_rdkit_log():
-                if iso:
-                    enums = dm.enumerate_stereoisomers(mol, n_variants=max_isomers, 
-                                                        undefined_only=False, rationalise=True, 
-                                                        timeout_seconds=30)
-                else:
-                    enums = dm.enumerate_tautomers(mol,n_variants=max_tautomers)
-                it_smiles = [dm.to_smiles(x) for x in enums]
-                res.update(Counter(it_smiles))
-        except:
-            pass        
-    return res    
-
-
-def expansion_by_iso_tautomerization(list_smiles: List[str], 
-                                      max_isomers: int=10, 
-                                      max_tautomers: int=10):
-    f = lambda x: [_iso_tautomerization_(x, max_isomers, max_tautomers)]
-    res = dm.parallelized_with_batches(f, list_smiles, batch_size=256, n_jobs=-1, progress=True)
-    res = merge_counters(res, step=5, verbose=0)
-    logger.info(f"Nb extended fragments: {len(res)}")
-    return res
+def expansion_by_iso_tautomerization(list_smiles: List[str]):
+    f = lambda x: [mols_iso_tautomerization(x)]
+    res = dm.parallelized_with_batches(f, list_smiles, 
+                                       batch_size=256, n_jobs=-1, progress=True)
+    print(len(res))
+    print(type(res[0]))
+    frags = merge_counters(res, step=5, verbose=0)
+    logger.info(f"Nb extended fragments: {len(frags)}")
+    return frags
 
 
 @cli.command()
-@click.option("--chunk-id", type=int,  help="chunk id starting at 0")
-@click.option("--chunk-size", type=int, default=1000000, help="Chunk size to divide and conquer.")
-@click.option("--max-isomers", type=int, default=10, help="Maximum number of isomers to enumerate (default: 10).")
-@click.option("--max-tautomers", type=int, default=5, help="Maximum number of tautomers to enumerate (default: 5).")
+@click.option("--chunk-id", "-i", type=int,  help="chunk id starting at 0")
+@click.option("--chunk-size", "-s", type=int, default=1000000, help="Chunk size to divide and conquer.")
 def iso_and_tauto(
         chunk_id,
-        chunk_size,
-        max_isomers: int=10,
-        max_tautomers: int=5) -> None:
+        chunk_size) -> None:
     """
     Load unichem molecules and expand them by fragment decomposition and
     stereoisomer + tautomer enumeration.
@@ -348,8 +289,6 @@ def iso_and_tauto(
 
         caching_wrapper(expansion_by_iso_tautomerization,
                         all_smiles,
-                        max_isomers=max_isomers,
-                        max_tautomers=max_tautomers,
                         local_path=local_file,
                         remote_path=remote_file,
                         remote_filesystem=remote_fs)

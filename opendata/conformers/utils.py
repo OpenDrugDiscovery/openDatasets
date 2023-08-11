@@ -49,7 +49,8 @@ def filter_by_rmsd(conformer_positions, topology, n_conformers: int = 25, center
         final_states.add(best)
 
     res = [conformer_positions[i] for i in final_states]
-    res = [c - c.mean(axis=0) for c in res]
+    if center_positions:
+        res = [c - c.mean(axis=0) for c in res]
 
     return res
 
@@ -90,6 +91,6 @@ def get_topology_system(mol: Union[str, Molecule], ff_engine: ForceField):
         ValueError,
     ) as error:
         logger.warning(f"Failed to setup the simulation for {mol.to_smiles()} due to a {type(error)}.")
-        return
+        raise error
     return openmm_topology, system
 
