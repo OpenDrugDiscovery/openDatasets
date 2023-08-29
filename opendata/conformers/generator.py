@@ -161,5 +161,4 @@ class ConformerGenerator():
         mol._conformers = None
         for c in all_conformers:
             mol.add_conformer(c * unit.nanometers)
-
         return mol

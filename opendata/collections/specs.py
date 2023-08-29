@@ -8,7 +8,7 @@ gaz_phase_dft = QCSpecification(
     method = "wb97m-d3bj",
     basis = "def2-tzvppd",
     keywords = {"wcombine": False, 
-                "implicit_solvent": None, # "water",
+                # "solvent": "none", # "water",
                 "scf_properties": [
                     "MBIS_CHARGES",
                     "WIBERG_LOWDIN_INDICES",
@@ -26,7 +26,8 @@ implicit_water_dft = QCSpecification(
     method = "wb97m-d3bj",
     basis = "def2-tzvppd",
     keywords = {"wcombine": False, 
-                "implicit_solvent": "water",
+                "pcm": True,
+                "pcm_solvent": "Water",
                 "scf_properties": [
                     "MBIS_CHARGES",
                     "WIBERG_LOWDIN_INDICES",

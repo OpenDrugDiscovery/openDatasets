@@ -22,7 +22,7 @@ def parallel_tempering_md(
         save_every: int = 10,
         friction_coeff: Quantity = 1 / unit.picosecond,
         max_minimization_steps: int = 0,
-        n_jobs=-1,
+        n_jobs=1,
 ):
     """
     Run parallel tempering MD simulations to generate conformers.
@@ -70,7 +70,6 @@ def parallel_tempering_md(
     res = dm.utils.parallelized(
         fn,
         [t for t in temperatures ],
-        progress=True,
         n_jobs=n_jobs,
     )
 
@@ -145,7 +144,7 @@ def run_single_md(
 
     # Run the simulation
     positions, energies = [], []
-    n = n_steps // save_every
+    n = int(n_steps // save_every)
     for _ in range(n+1):
         state = simulation.context.getState(getPositions=True, getEnergy=True)
         positions.append(state.getPositions(asNumpy=True))
